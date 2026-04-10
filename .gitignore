@@ -1,0 +1,49 @@
+# Build output (CMake)
+build/
+
+# Compiled binaries and objects
+*.exe
+*.obj
+*.o
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# Visual Studio
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcproj
+*.ncb
+*.suo
+*.user
+*.sdf
+*.opensdf
+*.aps
+
+# Logs
+*.log
+
+# Data/analysis output
+data/
+
+# Node
+node_modules/
+
+# Reference code (large external dependencies)
+ref/
+
+# Fluxite suggestions
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.claude/
+.cursor/
+.vscode/
+.idea/
+dist/
+.env
+npm-debug.log*

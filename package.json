@@ -1,0 +1,12 @@
+{
+  "name": "carviary",
+  "version": "1.0.0",
+  "description": "Carviary - Quake engine based on TomazQuake",
+  "scripts": {
+    "compile": "cmake -S src_cpp -B build -A Win32 && cmake --build build --config Release && echo Build complete: carviary.exe",
+    "start": "cd d:\\quake && carviary.exe",
+    "profile": "node scripts/profile.js",
+    "debug": "node scripts/debug.js",
+    "analyze": "cd d:\\quake && .\\carviary.exe +map start +analyze +quit"
+  }
+}
