@@ -642,8 +642,21 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	if (!isDedicated)
 	{
-		// Splash screen
-		int sw = 400, sh = 120;
+		// Splash screen - draw embedded logo bitmap
+		HBITMAP hSplash = (HBITMAP)LoadImage(hInstance, MAKEINTRESOURCE(IDB_SPLASH),
+			IMAGE_BITMAP, 0, 0, LR_DEFAULTCOLOR);
+
+		BITMAP bm;
+		int imgW = 320, imgH = 320;
+		if (hSplash && GetObject(hSplash, sizeof(bm), &bm))
+		{
+			imgW = bm.bmWidth;
+			imgH = bm.bmHeight;
+		}
+
+		int padding = 20;
+		int sw = imgW + padding * 2;
+		int sh = imgH + padding * 2;
 		int sx = (GetSystemMetrics(SM_CXSCREEN) - sw) / 2;
 		int sy = (GetSystemMetrics(SM_CYSCREEN) - sh) / 2;
 
@@ -662,24 +675,21 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 			FillRect(hdc, &rc, hbr);
 			DeleteObject(hbr);
 
-			SetBkMode(hdc, TRANSPARENT);
-			SetTextColor(hdc, RGB(200, 180, 140));
+			if (hSplash)
+			{
+				HDC hdcMem = CreateCompatibleDC(hdc);
+				HBITMAP hOld = (HBITMAP)SelectObject(hdcMem, hSplash);
+				BitBlt(hdc, padding, padding, imgW, imgH, hdcMem, 0, 0, SRCCOPY);
+				SelectObject(hdcMem, hOld);
+				DeleteDC(hdcMem);
+			}
 
-			HFONT hfont = CreateFont(
-				48, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-				ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-				ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, "Arial");
-			HFONT holdfont = (HFONT)SelectObject(hdc, hfont);
-
-			DrawText(hdc, "CARVIARY", -1, &rc,
-				DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
-			SelectObject(hdc, holdfont);
-			DeleteObject(hfont);
 			ReleaseDC(hwnd_dialog, hdc);
-
 			SetForegroundWindow (hwnd_dialog);
 		}
+
+		if (hSplash)
+			DeleteObject(hSplash);
 	}
 
 // take the greater of all the available memory or half the total memory,

@@ -29,6 +29,8 @@ build/
 # Data/analysis output
 data/
 
+build_sdl3/
+
 # Node
 node_modules/
 
