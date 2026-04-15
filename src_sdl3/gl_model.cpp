@@ -27,6 +27,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "gl_mirror.h"
 
+extern qboolean external_textures;
+
 model_t	*loadmodel;
 char	loadname[32];	// for hunk tags
 
@@ -445,7 +447,7 @@ void Mod_LoadQ1Textures (lump_t *l)
 		tx->fullbrights	= -1;
 		fullbrights		= false;
 
-		data = loadimagepixels(tx->name, false);
+		data = external_textures ? loadimagepixels(tx->name, false) : NULL;
 
 		if (data)
 		{
@@ -503,7 +505,10 @@ void Mod_LoadQ1Textures (lump_t *l)
 
 						fullbrights = Has_Fullbrights (data, size);
 
-						tx->gl_texturenum	= GL_LoadTexture (tx->name, tx->width, tx->height, data, true, false, 1);
+						if (tx->name[0] == '{')
+							tx->transparent = true;
+
+						tx->gl_texturenum	= GL_LoadTexture (tx->name, tx->width, tx->height, data, true, tx->transparent, 1);
 
 						if (fullbrights)
 						{
@@ -699,7 +704,7 @@ void Mod_LoadHLTextures (lump_t *l)
 		tx->transparent	= false;
 		tx->fullbrights = -1;
 
-		data = loadimagepixels(tx->name, false);
+		data = external_textures ? loadimagepixels(tx->name, false) : NULL;
 
 		if (data)
 		{

@@ -22,6 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 #include "quakedef.h"
 
+qboolean	external_textures = false; // -external to enable TGA/PCX texture replacements
+
 typedef struct
 {
 	int				width;
@@ -853,6 +855,7 @@ byte* loadimagepixels (char* filename, qboolean complain)
 	FILE	*f;
 	char	basename[128], name[128];
 	char	*c;
+
 	COM_StripExtension(filename, basename); // strip the extension to allow TGA and PCX
 
 	for (c = basename;*c;c++)

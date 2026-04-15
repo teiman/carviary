@@ -412,6 +412,15 @@ int main(int argc, char *argv[])
 	// -- Init math constants (anglemod etc.) -----------------------------------
 	Math_Init();
 
+	// -- Parse -external flag (enable TGA/PCX texture replacements) ------------
+	{
+		extern qboolean external_textures;
+		external_textures = false;
+		for (int i = 1; i < argc; i++)
+			if (!strcmp(argv[i], "-external"))
+				external_textures = true;
+	}
+
 	// -- Parse -dedicated flag early -------------------------------------------
 	isDedicated = false;
 	for (int i = 1; i < argc; i++)

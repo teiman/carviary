@@ -884,13 +884,10 @@ void R_Clear (void)
 	else
 	{
 		if (gl_clear.value || gl_wireonly.value)
-		{
 			glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		}
 		else
-		{
 			glClear (GL_DEPTH_BUFFER_BIT);
-		}
+
 		gldepthmin = 0;
 		gldepthmax = 1;
 		glDepthFunc (GL_LEQUAL);
@@ -1000,13 +997,9 @@ void R_RenderView (void)
 	}
 
 	if (r_mirroralpha.value >= 1.0)
-	{
 		r_mirroralpha.value = 1.0;
-	}
 	else if (r_mirroralpha.value <= 0)
-	{
 		r_mirroralpha.value = 0;
-	}
 
 	mirror = false;
 	mirror_render = false;
@@ -1015,9 +1008,7 @@ void R_RenderView (void)
 	R_RenderScene();
 
 	if (mirror)
-	{
 		R_Mirror ();
-	}
 
 	R_DrawViewModel ();
 	R_PolyBlend ();

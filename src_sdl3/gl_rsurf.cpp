@@ -307,15 +307,20 @@ void R_DrawBrushMTex (msurface_t *s)
 	int			i;
 	texture_t	*t;
 	glRect_t	*theRect;
+	qboolean	fence;
 
 	p = s->polys;
 
 	t = R_TextureAnimation (s->texinfo->texture);
+	fence = t->transparent;
+
+	if (fence)
+		glEnable(GL_ALPHA_TEST);
 
 	if(t->rs)
 	{
 		R_DrawBrushMTexScript (s);
-		
+		if (fence) glDisable(GL_ALPHA_TEST);
 		return;
 	}
 	glBindTexture (GL_TEXTURE_2D, t->gl_texturenum);
@@ -377,6 +382,9 @@ void R_DrawBrushMTex (msurface_t *s)
 
 		glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 	}
+
+	if (fence)
+		glDisable(GL_ALPHA_TEST);
 }
 
 int RS_AnimTexture(int rs);
@@ -526,10 +534,13 @@ void R_DrawBrushNoMTex (msurface_t *s)
 	glpoly_t	*p;
 	int			j;
 	glRect_t	*theRect;
+	qboolean	fence;
 
 	p = s->polys;
 
 	t = R_TextureAnimation (s->texinfo->texture);
+	fence = t->transparent;
+	if (fence) glEnable(GL_ALPHA_TEST);
 	glBindTexture (GL_TEXTURE_2D, t->gl_texturenum);
 
 	glBegin (GL_POLYGON);
@@ -589,6 +600,7 @@ void R_DrawBrushNoMTex (msurface_t *s)
 	}
 
 	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	if (fence) glDisable(GL_ALPHA_TEST);
 }
 
 extern qboolean hl_map;
@@ -609,7 +621,7 @@ void R_DrawBrushMTexTrans (msurface_t *s, float alpha)
 	glColor4f (1,1,1,alpha);
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-	if (hl_map)
+	if (hl_map || s->texinfo->texture->transparent)
 		glEnable(GL_ALPHA_TEST);
 
 	p = s->polys;
@@ -649,7 +661,7 @@ void R_DrawBrushMTexTrans (msurface_t *s, float alpha)
 	glDisable(GL_TEXTURE_2D);
 	qglSelectTextureSGIS_ARB(TEXTURE0_SGIS_ARB);
 
-	if (hl_map)
+	if (hl_map || s->texinfo->texture->transparent)
 		glDisable(GL_ALPHA_TEST);
 
 	glColor4f (1,1,1,1);

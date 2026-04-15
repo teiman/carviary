@@ -30,6 +30,7 @@ build/
 data/
 
 build_sdl3/
+SDL3-3.2.14/
 
 # Node
 node_modules/

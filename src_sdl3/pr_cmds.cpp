@@ -1503,12 +1503,46 @@ void PF_WriteEntity (void)
 
 int SV_ModelIndex (char *name);
 
+extern entity_t cl_static_entities[];
+
 void PF_makestatic (void)
 {
 	edict_t	*ent;
 	int		i;
-	
+
 	ent = G_EDICT(OFS_PARM0);
+
+	// Offline mode: create static entity directly on the client
+	if (offline_mode)
+	{
+		if (cl.num_statics >= MAX_STATIC_ENTITIES)
+		{
+			Con_Printf("Too many static entities\n");
+			ED_Free(ent);
+			return;
+		}
+		entity_t *cent = &cl_static_entities[cl.num_statics];
+		cl.num_statics++;
+
+		cent->baseline.modelindex = SV_ModelIndex(pr_strings + ent->v.model);
+		cent->baseline.frame = (int)ent->v.frame;
+		cent->baseline.colormap = (int)ent->v.colormap;
+		cent->baseline.skin = (int)ent->v.skin;
+		VectorCopy(ent->v.origin, cent->baseline.origin);
+		VectorCopy(ent->v.angles, cent->baseline.angles);
+
+		cent->model = cl.model_precache[cent->baseline.modelindex];
+		cent->frame = cent->baseline.frame;
+		cent->colormap = vid.colormap;
+		cent->skinnum = cent->baseline.skin;
+		cent->effects = 0;
+		VectorCopy(ent->v.origin, cent->origin);
+		VectorCopy(ent->v.angles, cent->angles);
+		R_AddEfrags(cent);
+
+		ED_Free(ent);
+		return;
+	}
 
 	if (sv.protocol == PROTOCOL_RMQ)
 	{
