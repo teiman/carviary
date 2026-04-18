@@ -83,6 +83,7 @@ typedef struct texture_s
 	unsigned			offsets[MIPLEVELS];	// four mip maps stored
 	int					fullbrights;		// Tomaz - Fullbrights
 	int					transparent;		// Tomaz - HL Bsp's
+	struct msurface_s	*texturechain;		// head of per-frame surface chain (world batching)
 } texture_t;
 
 #define	SURF_PLANEBACK		2

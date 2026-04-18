@@ -21,6 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_mat4.h"
+#include "gl_profiler.h"
 
 // precalculated dot products for quantized angles
 extern float	r_avertexnormal_dots_mdl[16][256];
@@ -32,7 +34,7 @@ float   lightlerpoffset;
 extern int	lastposenum;
 extern int	lastposenum0;
 void	R_LightPoint (vec3_t p);
-int		playertextures;		// up to 16 color translated skins
+GLuint	playertextures[16];		// up to 16 color translated skins
 int		c_brush_polys, c_alias_polys;
 int		r_visframecount;	// bumped when going to a new PVS
 int		r_framecount;		// used for dlight push checking
@@ -83,12 +85,6 @@ cvar_t	gl_clear			= {"gl_clear","0", true};
 cvar_t	gl_nocolors			= {"gl_nocolors","0"};
 cvar_t	gl_keeptjunctions	= {"gl_keeptjunctions","1"};
 cvar_t	gl_doubleeyes		= {"gl_doubleeys", "1"};
-cvar_t  gl_fogenable		= {"gl_fogenable", "0", true}; 
-cvar_t  gl_fogstart			= {"gl_fogstart", "50.0", true}; 
-cvar_t  gl_fogend			= {"gl_fogend", "800.0", true}; 
-cvar_t  gl_fogred			= {"gl_fogred","0.6", true};
-cvar_t  gl_foggreen			= {"gl_foggreen","0.5", true}; 
-cvar_t  gl_fogblue			= {"gl_fogblue","0.4", true}; 
 cvar_t	centerfade			= {"centerfade", "0", true};	// Tomaz - Fading CenterPrints
 cvar_t	sbar_alpha			= {"sbar_alpha", "1", true};	// Tomaz - Sbar Alpha
 cvar_t	con_alpha			= {"con_alpha", "0.5", true};	// Tomaz - Console Alpha
@@ -170,7 +166,7 @@ void R_BlendedRotateForEntity (entity_t *e, int shadow)	// Tomaz - New Shadow
 
 	VectorSubtract (e->origin2, e->origin1, d);
 
-	glTranslatef (
+	MatStack_MulTranslate(&r_modelview,
 		e->origin1[0] + (blend * d[0]),
 		e->origin1[1] + (blend * d[1]),
 		e->origin1[2] + (blend * d[2]));
@@ -215,17 +211,15 @@ void R_BlendedRotateForEntity (entity_t *e, int shadow)	// Tomaz - New Shadow
 		}
 	}
 
-	// Tomaz - New Shadow Begin
-	glRotatef ( e->angles1[1] + ( blend * d[1]),  0, 0, 1);
+	MatStack_MulRotate(&r_modelview, e->angles1[1] + blend * d[1], 0, 0, 1);
 
-	if (shadow==0)
+	if (shadow == 0)
 	{
-              glRotatef (-e->angles1[0] + (-blend * d[0]),  0, 1, 0);
-              glRotatef ( e->angles1[2] + ( blend * d[2]),  1, 0, 0);
+		MatStack_MulRotate(&r_modelview, -e->angles1[0] - blend * d[0], 0, 1, 0);
+		MatStack_MulRotate(&r_modelview,  e->angles1[2] + blend * d[2], 1, 0, 0);
 	}
-	// Tomaz - New Shadow End
 
-	glScalef  (e->scale, e->scale, e->scale);	// Tomaz - QC Scale
+	MatStack_MulScale(&r_modelview, e->scale, e->scale, e->scale);
 }
 // Tomaz - Model Transform Interpolation End
 /*
@@ -236,17 +230,17 @@ functions used to draw the weapon models, so we don't have that nasty effect
 */
 void R_RotateForEntity (entity_t *e, int shadow)
 {
-    glTranslatef (e->origin[0],  e->origin[1],  e->origin[2]);
+	MatStack_MulTranslate(&r_modelview, e->origin[0], e->origin[1], e->origin[2]);
 
-    glRotatef (e->angles[1],  0, 0, 1);
+	MatStack_MulRotate(&r_modelview, e->angles[1], 0, 0, 1);
 
 	if (shadow == 0)
 	{
-		glRotatef (-e->angles[0],  0, 1, 0);
-		glRotatef (e->angles[2],  1, 0, 0);
+		MatStack_MulRotate(&r_modelview, -e->angles[0], 0, 1, 0);
+		MatStack_MulRotate(&r_modelview,  e->angles[2], 1, 0, 0);
 	}
 
-	glScalef  (e->scale, e->scale, e->scale);	// Tomaz - QC Scale
+	MatStack_MulScale(&r_modelview, e->scale, e->scale, e->scale);
 }
 
 qboolean weaponmodel = false;
@@ -344,7 +338,7 @@ void R_DrawAliasModel (entity_t *e, int cull)
 	paliashdr = (aliashdr_t *)Mod_Extradata (currententity->model);
 	c_alias_polys += paliashdr->numtris;
 
-	glPushMatrix ();
+	MatStack_Push(&r_modelview);
 
 	// prevent viewmodels from messing up
 	if (!weaponmodel)
@@ -354,14 +348,14 @@ void R_DrawAliasModel (entity_t *e, int cull)
 
 	if (!strcmp (clmodel->name, "progs/eyes.mdl") && gl_doubleeyes.value)
 	{
-		glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2] - (22 + 8));
+		MatStack_MulTranslate(&r_modelview, paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2] - (22 + 8));
 		// double size of eyes, since they are really hard to see in gl
-		glScalef (paliashdr->scale[0]*2, paliashdr->scale[1]*2, paliashdr->scale[2]*2);
+		MatStack_MulScale(&r_modelview, paliashdr->scale[0]*2, paliashdr->scale[1]*2, paliashdr->scale[2]*2);
 	}
 	else
 	{
-		glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2]);
-		glScalef (paliashdr->scale[0], paliashdr->scale[1], paliashdr->scale[2]);
+		MatStack_MulTranslate(&r_modelview, paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2]);
+		MatStack_MulScale(&r_modelview, paliashdr->scale[0], paliashdr->scale[1], paliashdr->scale[2]);
 	}
 
 	anim = (int)(cl.time*10) & 3;
@@ -375,7 +369,7 @@ void R_DrawAliasModel (entity_t *e, int cull)
 	{
 		i = currententity - cl_entities;
 		if (i >= 1 && i<=cl.maxclients)
-			glBindTexture (GL_TEXTURE_2D, playertextures - 1 + i);
+			glBindTexture (GL_TEXTURE_2D, playertextures[i - 1]);
 	}
 
 	GL_DrawAliasBlendedFrame (currententity->frame, paliashdr, currententity);
@@ -386,7 +380,7 @@ void R_DrawAliasModel (entity_t *e, int cull)
 		GL_DrawAliasBlendedFrame (currententity->frame, paliashdr, currententity);
 	}
 
-	glPopMatrix ();
+	MatStack_Pop(&r_modelview);
 
 	// Glow flare begin - see gl_flares.c for more info
 	if (gl_glows.value)
@@ -479,13 +473,19 @@ transgetent:
 	switch (currententity->model->type)
 	{
 	case mod_alias:
+		Prof_BeginSection (PROF_CPU_ALIAS);
 		R_DrawAliasModel  (currententity, true);
+		Prof_EndSection (PROF_CPU_ALIAS);
 		break;
 	case mod_brush:
+		Prof_BeginSection (PROF_CPU_BRUSH_TRANS);
 		R_SetupBrushPolys (currententity);
+		Prof_EndSection (PROF_CPU_BRUSH_TRANS);
 		break;
 	case mod_sprite:
+		Prof_BeginSection (PROF_CPU_SPRITE);
 		R_DrawSpriteModel (currententity);
+		Prof_EndSection (PROF_CPU_SPRITE);
 		break;
 	default:
 		break;
@@ -620,6 +620,7 @@ void R_PolyBlend (void)
 	{
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glUniform4f(R_FullscreenShader_u_color, v_blend[0], v_blend[1], v_blend[2], v_blend[3]);
+		Prof_CountDraw(6);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
 
@@ -629,7 +630,9 @@ void R_PolyBlend (void)
 	{
 		glBlendFunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
 		glUniform4f(R_FullscreenShader_u_color, 1.0f, 1.0f, 1.0f, brightness.value);
+		Prof_CountDraw(6);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
+		Prof_CountDraw(6);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
@@ -720,15 +723,16 @@ void R_SetupFrame (void)
 
 void MYgluPerspective( GLdouble fovy, GLdouble aspect, GLdouble zNear, GLdouble zFar )
 {
-   GLdouble xmin, xmax, ymin, ymax;
+	// Compose frustum onto the current projection stack top.
+	float ymax = (float)(zNear * tan(fovy * 0.008726646259971));
+	float ymin = -ymax;
+	float xmin = ymin * (float)aspect;
+	float xmax = ymax * (float)aspect;
 
-   ymax = zNear * tan( fovy * 0.008726646259971);	// Tomaz Speed
-   ymin = -ymax;
-
-   xmin = ymin * aspect;
-   xmax = ymax * aspect;
-
-   glFrustum( xmin, xmax, ymin, ymax, zNear, zFar );
+	mat4_t f;
+	mat4_frustum(&f, xmin, xmax, ymin, ymax, (float)zNear, (float)zFar);
+	mat4_t cur = *MatStack_Top(&r_projection);
+	mat4_mul(MatStack_Top(&r_projection), &cur, &f);
 }
 
 /*
@@ -746,8 +750,7 @@ void R_SetupGL (void)
 	//
 	// set up viewpoint
 	//
-	glMatrixMode(GL_PROJECTION);
-    glLoadIdentity ();
+	MatStack_LoadIdentity(&r_projection);
 	x = r_refdef.vrect.x * glwidth/vid.width;
 	x2 = (r_refdef.vrect.x + r_refdef.vrect.width) * glwidth/vid.width;
 	y = (vid.height-r_refdef.vrect.y) * glheight/vid.height;
@@ -782,17 +785,16 @@ void R_SetupGL (void)
 	}
 
 
-	glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity ();
+	MatStack_LoadIdentity(&r_modelview);
+	MatStack_MulRotate(&r_modelview, -90,                       1, 0, 0);  // put Z going up
+	MatStack_MulRotate(&r_modelview,  90,                       0, 0, 1);  // put Z going up
+	MatStack_MulRotate(&r_modelview, -r_refdef.viewangles[2],   1, 0, 0);
+	MatStack_MulRotate(&r_modelview, -r_refdef.viewangles[0],   0, 1, 0);
+	MatStack_MulRotate(&r_modelview, -r_refdef.viewangles[1],   0, 0, 1);
+	MatStack_MulTranslate(&r_modelview, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 
-    glRotatef (-90,  1, 0, 0);	    // put Z going up
-    glRotatef (90,  0, 0, 1);	    // put Z going up
-    glRotatef (-r_refdef.viewangles[2],  1, 0, 0);
-    glRotatef (-r_refdef.viewangles[0],  0, 1, 0);
-    glRotatef (-r_refdef.viewangles[1],  0, 0, 1);
-    glTranslatef (-r_refdef.vieworg[0],  -r_refdef.vieworg[1],  -r_refdef.vieworg[2]);
-
-	glGetFloatv (GL_MODELVIEW_MATRIX, r_world_matrix);
+	// Keep r_world_matrix in sync: some paths (water) reload it onto the modelview.
+	memcpy(r_world_matrix, MatStack_Top(&r_modelview)->m, sizeof(r_world_matrix));
 
 	//
 	// set drawing parms
@@ -808,6 +810,7 @@ R_Clear
 */
 void R_Clear (void)
 {
+	Prof_BeginSection (PROF_CLEAR);
 	if (gl_clear.value)
 		glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	else
@@ -818,6 +821,7 @@ void R_Clear (void)
 	glDepthFunc (GL_LEQUAL);
 
 	glDepthRange (gldepthmin, gldepthmax);
+	Prof_EndSection (PROF_CLEAR);
 }
 
 /*
@@ -831,12 +835,12 @@ void R_MoveParticles ();
 
 void R_RenderScene (void)
 {
-	vec3_t		colors;
-
 	double	time1, time2;
 
 	if (r_norefresh.value)
 		return;
+
+	Prof_BeginSection (PROF_SCENE);
 
 	if (r_speeds.value)
 	{
@@ -854,57 +858,66 @@ void R_RenderScene (void)
 
 	R_SetupGL ();
 
+	Prof_BeginSection (PROF_CPU_MARK_LEAVES);
 	R_MarkLeaves ();	// done here so we know if we're in water
+	Prof_EndSection (PROF_CPU_MARK_LEAVES);
 
 	R_DrawWorld ();		// adds static entities to the list
 
 	S_ExtraUpdate ();	// don't let sound get messed up if going slow
 
+	Prof_BeginSection (PROF_CPU_TRANS_SETUP);
 	R_SetupTransEntities ();
+	Prof_EndSection (PROF_CPU_TRANS_SETUP);
 
+	Prof_BeginSection (PROF_CPU_PARTICLES);
 	R_MoveParticles ();
+	Prof_EndSection (PROF_CPU_PARTICLES);
 
 	if (cl.cshifts[CSHIFT_CONTENTS].percent == 0)
 	{
 		R_SortTransEntities (true);
-		if (gl_particles.value)
+		if (gl_particles.value) {
+			Prof_BeginSection (PROF_CPU_PARTICLES);
 			R_DrawParticles (true);	// Tomaz - fixing particle / water bug
+			Prof_EndSection (PROF_CPU_PARTICLES);
+		}
+		Prof_BeginSection (PROF_CPU_WATER);
 		R_DrawWaterSurfaces (); // Tomaz - fixing particle / water bug
+		Prof_EndSection (PROF_CPU_WATER);
 		R_SortTransEntities (false);
-		if (gl_particles.value)
+		if (gl_particles.value) {
+			Prof_BeginSection (PROF_CPU_PARTICLES);
 			R_DrawParticles (false);// Tomaz - fixing particle / water bug
+			Prof_EndSection (PROF_CPU_PARTICLES);
+		}
 	}
 	else
 	{
 		R_SortTransEntities (false);
-		if (gl_particles.value)
+		if (gl_particles.value) {
+			Prof_BeginSection (PROF_CPU_PARTICLES);
 			R_DrawParticles (false);// Tomaz - fixing particle / water bug
+			Prof_EndSection (PROF_CPU_PARTICLES);
+		}
+		Prof_BeginSection (PROF_CPU_WATER);
 		R_DrawWaterSurfaces ();	// Tomaz - fixing particle / water bug
+		Prof_EndSection (PROF_CPU_WATER);
 		R_SortTransEntities (true);
-		if (gl_particles.value)
+		if (gl_particles.value) {
+			Prof_BeginSection (PROF_CPU_PARTICLES);
 			R_DrawParticles (true);	// Tomaz - fixing particle / water bug
+			Prof_EndSection (PROF_CPU_PARTICLES);
+		}
 	}
 
 	if (r_speeds.value)
 	{
-//		glFinish ();
 		time2 = Sys_FloatTime ();
-		Con_Printf ("%3i ms  %4i wpoly %4i epoly\n", (int)((time2-time1)*1000), c_brush_polys, c_alias_polys); 
+		Con_Printf ("%3i ms  %4i wpoly %4i epoly\n", (int)((time2-time1)*1000), c_brush_polys, c_alias_polys);
 	}
 
-	glDisable(GL_FOG);
-
-	if (gl_fogenable.value)
-	{
-		glFogi(GL_FOG_MODE, GL_LINEAR);
-			colors[0] = gl_fogred.value;
-			colors[1] = gl_foggreen.value;
-			colors[2] = gl_fogblue.value; 
-		glFogfv(GL_FOG_COLOR, colors); 
-		glFogf(GL_FOG_START, gl_fogstart.value); 
-		glFogf(GL_FOG_END, gl_fogend.value); 
-		glEnable(GL_FOG);
-	}
+	Prof_EndSection (PROF_SCENE);
 }
 
 /*
@@ -922,6 +935,11 @@ void R_RenderView (void)
 	R_Clear ();
 	R_RenderScene();
 
+	Prof_BeginSection (PROF_VIEWMODEL);
 	R_DrawViewModel ();
+	Prof_EndSection (PROF_VIEWMODEL);
+
+	Prof_BeginSection (PROF_POLYBLEND);
 	R_PolyBlend ();
+	Prof_EndSection (PROF_POLYBLEND);
 }

@@ -534,8 +534,6 @@ void Con_DrawNotify (void)
 
 	int j;	// Tomaz
 
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);	// Tomaz - Colored Characters
-
 	Draw_BeginCharBatch();
 
 	v = 0;
@@ -565,14 +563,14 @@ void Con_DrawNotify (void)
 				if (text[x + 1] == 'f')
 				{
 					x += 2;
-					glColor3f((float)  (text[x]     - '0') * 0.11111111,	// Tomaz - Speed
-							  (float)  (text[x + 1] - '0') * 0.11111111,	// Tomaz - Speed
-							  (float)  (text[x + 2] - '0') * 0.11111111);	// Tomaz - Speed
+					Draw_SetCharColor((float)(text[x]     - '0') * 0.11111111f,
+					                  (float)(text[x + 1] - '0') * 0.11111111f,
+					                  (float)(text[x + 2] - '0') * 0.11111111f, 1.0f);
 					x += 5;
 				}
 				else if (text[x + 1] == 'r')
 				{
-					glColor3f(1,1,1);
+					Draw_SetCharColor(1, 1, 1, 1);
 					x += 3;
 				}
 			}
@@ -600,8 +598,7 @@ void Con_DrawNotify (void)
 		v += 8;
 	}
 
-	glColor3f(1,1,1);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+	Draw_SetCharColor(1, 1, 1, 1);
 
 	if (v > con_notifylines)
 		con_notifylines = v;
@@ -643,8 +640,6 @@ void Con_DrawConsole (int lines, qboolean drawinput)
 		sb=0;
 	// Tomaz - Scroll Enhance End
 
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); // Tomaz - Colored Characters
-
 	Draw_BeginCharBatch();
 
 //	for (i= con_current - rows + 1 ; i<=con_current ; i++, y+=8 )
@@ -665,15 +660,15 @@ void Con_DrawConsole (int lines, qboolean drawinput)
 				if (text[x + 1] == 'f')
 				{
 					x += 2;
-					r = (float)(text[x]     - '0') * 0.11111111;	// Tomaz - Speed
-					g = (float)(text[x + 1] - '0') * 0.11111111;	// Tomaz - Speed
-					b = (float)(text[x + 2] - '0') * 0.11111111;	// Tomaz - Speed
-					glColor3f(r,g,b);
+					r = (float)(text[x]     - '0') * 0.11111111f;
+					g = (float)(text[x + 1] - '0') * 0.11111111f;
+					b = (float)(text[x + 2] - '0') * 0.11111111f;
+					Draw_SetCharColor(r, g, b, 1.0f);
 					x += 5;
 				}
 				else if (text[x + 1] == 'r')
 				{
-					glColor3f(1,1,1);
+					Draw_SetCharColor(1, 1, 1, 1);
 					x += 3;
 				}
 			}
@@ -703,9 +698,7 @@ void Con_DrawConsole (int lines, qboolean drawinput)
 	{
 		Con_DrawInput ();
 	}
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE); 
-	glColor3f(1,1,1);
-	// Tomaz - Colored Characters End
+	Draw_SetCharColor(1, 1, 1, 1);
 }
 
 

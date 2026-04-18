@@ -22,8 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bsp_render.h"
 #include "gl_render.h"
-
-extern	qboolean gl_mtexable;
+#include "gl_mat4.h"
+#include "gl_profiler.h"
 
 // World rendering: one streaming VBO reused per surface draw. Each surface is
 // a fan of N verts; we re-triangulate to N-2 triangles on upload.
@@ -36,20 +36,24 @@ typedef struct {
 static DynamicVBO world_vbo;
 static qboolean   world_vbo_ready = false;
 
-// Max verts per surface fan in practice is tiny (~8-16), but keep some slack.
-#define WORLD_MAX_VERTS 512
+// Batched world draws emit one glDrawArrays per (texture, lightmap) group.
+// An ad_dm1-sized frame yields ~15-20k post-triangulation verts per texture
+// at peak, so we size for that. 65536 keeps a safe margin.
+#define WORLD_MAX_VERTS 65536
 
 static void World_EnsureVBO(void)
 {
 	if (world_vbo_ready) return;
-	DynamicVBO_Init(&world_vbo, WORLD_MAX_VERTS * sizeof(world_vtx_t));
+	// 4x the per-frame soup capacity -- enough ring space that wraps are rare
+	// and GPU never reads a region the CPU is about to overwrite.
+	DynamicVBO_Init(&world_vbo, 4 * WORLD_MAX_VERTS * sizeof(world_vtx_t));
 	DynamicVBO_SetAttrib(&world_vbo, 0, 3, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t), offsetof(world_vtx_t, x));
 	DynamicVBO_SetAttrib(&world_vbo, 1, 2, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t), offsetof(world_vtx_t, s));
 	DynamicVBO_SetAttrib(&world_vbo, 2, 2, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t), offsetof(world_vtx_t, lm_s));
 	world_vbo_ready = true;
 }
 
-int			lightmap_textures;
+GLuint		lightmap_textures[MAX_LIGHTMAPS];
 int			lightmap_bytes = 4;
 int			lightmap_format = GL_RGBA;
 
@@ -287,8 +291,6 @@ extern	int		solidskytexture;
 extern	int		alphaskytexture;
 extern	float	speedscale;		// for top sky and bottom sky
 
-lpMTexFUNC qglMTexCoord2fSGIS_ARB = NULL;
-lpSelTexFUNC qglSelectTextureSGIS_ARB = NULL;
 
 /*
 ====================
@@ -325,7 +327,7 @@ void R_DrawBrushMTex (msurface_t *s)
 		lightmap_modified[i] = false;
 		theRect = &lightmap_rectchange[i];
 		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, lightmap_textures + i);
+		glBindTexture(GL_TEXTURE_2D, lightmap_textures[i]);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, theRect->t, BLOCK_WIDTH, theRect->h, lightmap_format, GL_UNSIGNED_BYTE, lightmaps+(i* BLOCK_HEIGHT + theRect->t) *BLOCK_WIDTH*lightmap_bytes);
 		theRect->l = BLOCK_WIDTH;
 		theRect->t = BLOCK_HEIGHT;
@@ -337,7 +339,7 @@ void R_DrawBrushMTex (msurface_t *s)
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, t->gl_texturenum);
 	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, lightmap_textures + s->lightmaptexturenum);
+	glBindTexture(GL_TEXTURE_2D, lightmap_textures[s->lightmaptexturenum]);
 	glActiveTexture(GL_TEXTURE0);
 
 	// Triangulate the convex polygon as a fan -> N-2 triangles.
@@ -379,6 +381,7 @@ void R_DrawBrushMTex (msurface_t *s)
 
 	DynamicVBO_Upload(&world_vbo, soup, (GLsizei)(n * sizeof(world_vtx_t)));
 	DynamicVBO_Bind(&world_vbo);
+	Prof_CountDraw(n);
 	glDrawArrays(GL_TRIANGLES, 0, n);
 
 	// Underwater caustics: brighten the surface with a cycling mask when the
@@ -410,6 +413,7 @@ void R_DrawBrushMTex (msurface_t *s)
 			glUniform1i(R_WorldFullbrightShader_u_tex, 0);
 
 			DynamicVBO_Bind(&world_vbo);
+			Prof_CountDraw(n);
 			glDrawArrays(GL_TRIANGLES, 0, n);
 
 			glBlendFunc((GLenum)blend_src, (GLenum)blend_dst);
@@ -458,7 +462,7 @@ void R_DrawBrushMTexTrans (msurface_t *s, float alpha)
 		lightmap_modified[i] = false;
 		theRect = &lightmap_rectchange[i];
 		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, lightmap_textures + i);
+		glBindTexture(GL_TEXTURE_2D, lightmap_textures[i]);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, theRect->t, BLOCK_WIDTH, theRect->h, lightmap_format, GL_UNSIGNED_BYTE, lightmaps+(i* BLOCK_HEIGHT + theRect->t) *BLOCK_WIDTH*lightmap_bytes);
 		theRect->l = BLOCK_WIDTH;
 		theRect->t = BLOCK_HEIGHT;
@@ -470,7 +474,7 @@ void R_DrawBrushMTexTrans (msurface_t *s, float alpha)
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, t->gl_texturenum);
 	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, lightmap_textures + s->lightmaptexturenum);
+	glBindTexture(GL_TEXTURE_2D, lightmap_textures[s->lightmaptexturenum]);
 	glActiveTexture(GL_TEXTURE0);
 
 	// Triangulate the convex polygon as a fan -> N-2 triangles.
@@ -516,6 +520,7 @@ void R_DrawBrushMTexTrans (msurface_t *s, float alpha)
 
 	DynamicVBO_Upload(&world_vbo, soup, (GLsizei)(n * sizeof(world_vtx_t)));
 	DynamicVBO_Bind(&world_vbo);
+	Prof_CountDraw(n);
 	glDrawArrays(GL_TRIANGLES, 0, n);
 
 	if (!blend_was_on) glDisable(GL_BLEND);
@@ -599,30 +604,129 @@ dynamic:
 /*
 ================
 R_DrawWaterSurfaces
+
+Batched water path. Groups waterchain surfaces by texture (maps can have any
+number of distinct water/lava/slime/teleporter textures), triangulates every
+surface into a single soup, uploads once, then emits one glDrawArrays per
+texture. Mirrors what R_EmitTextureChains does for opaque world surfaces.
 ================
 */
+// Defined in gl_warp.cpp. Same layout, C++ linkage (matches gl_warp.cpp).
+typedef struct { float x, y, z; float s, t; } warp_vtx_t;
+extern warp_vtx_t warp_soup[16384];
+extern DynamicVBO warp_vbo;
+extern void Warp_EnsureVBO(void);
+extern int  Water_AppendSurface(msurface_t *s, warp_vtx_t *dst, int *n_inout, int cap);
+#define WARP_MAX_VERTS 16384
+
+typedef struct {
+	int        first;
+	int        count;
+	texture_t *t;
+} water_draw_range_t;
+
 void R_DrawWaterSurfaces (void)
 {
-	msurface_t	*s;
+	if (!waterchain) return;
 
-	if (!waterchain)
-		return;
-
-	glLoadMatrixf (r_world_matrix);
+	// Restore the world modelview (brush entity transforms may have left
+	// their own transform on the stack).
+	mat4_t world;
+	memcpy(world.m, r_world_matrix, sizeof(world.m));
+	MatStack_Load(&r_modelview, &world);
 
 	float alpha = (r_wateralpha.value < 1.0f) ? r_wateralpha.value : 1.0f;
+	if (!R_EnsureWorldWaterShader()) { waterchain = NULL; return; }
+	Warp_EnsureVBO();
 
-	for (s = waterchain; s; s = s->texturechain)
+	// ---- collect phase ----
+	// Walk waterchain, bucket surfaces by texture. Maps can have any number
+	// of liquid textures (water, lava, slime, teleporter, modded variants).
+	enum { MAX_WATER_TEXTURES = 32, MAX_PER_BUCKET = 4096 };
+	texture_t *bucket_tex[MAX_WATER_TEXTURES];
+	static msurface_t *bsurfs[MAX_WATER_TEXTURES][MAX_PER_BUCKET];
+	int bcount[MAX_WATER_TEXTURES];
+	int nbuckets = 0;
+	for (int i = 0; i < MAX_WATER_TEXTURES; ++i) bcount[i] = 0;
+
+	for (msurface_t *s = waterchain; s; s = s->texturechain)
 	{
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, s->texinfo->texture->gl_texturenum);
-		EmitWaterPolys(s, alpha);
+		texture_t *t = s->texinfo->texture;
+		int b;
+		for (b = 0; b < nbuckets; ++b) if (bucket_tex[b] == t) break;
+		if (b == nbuckets) {
+			if (nbuckets >= MAX_WATER_TEXTURES) continue;
+			bucket_tex[b] = t;
+			nbuckets++;
+		}
+		if (bcount[b] < MAX_PER_BUCKET)
+			bsurfs[b][bcount[b]++] = s;
+	}
+	waterchain = NULL;
+
+	// Triangulate every bucket into warp_soup back-to-back, recording ranges.
+	static water_draw_range_t ranges[MAX_WATER_TEXTURES];
+	int nranges = 0;
+	int nverts = 0;
+
+	for (int b = 0; b < nbuckets; ++b)
+	{
+		int range_first = nverts;
+		for (int i = 0; i < bcount[b]; ++i)
+		{
+			if (nverts >= WARP_MAX_VERTS - 30) break;
+			Water_AppendSurface(bsurfs[b][i], warp_soup, &nverts, WARP_MAX_VERTS);
+		}
+		int range_count = nverts - range_first;
+		if (range_count > 0) {
+			ranges[nranges].first = range_first;
+			ranges[nranges].count = range_count;
+			ranges[nranges].t     = bucket_tex[b];
+			nranges++;
+		}
 	}
 
-	waterchain = NULL;
+	if (nverts == 0) return;
+
+	// ---- upload phase: ring-streaming (no orphan stall) ----
+	Prof_BeginSection (PROF_CPU_WATER_UPLOAD);
+	GLsizei byte_offset = DynamicVBO_UploadStream(&warp_vbo, warp_soup,
+	                                              (GLsizei)(nverts * sizeof(warp_vtx_t)));
+	GLsizei vertex_offset = byte_offset / (GLsizei)sizeof(warp_vtx_t);
+	Prof_EndSection (PROF_CPU_WATER_UPLOAD);
+	DynamicVBO_Bind(&warp_vbo);
+
+	float mvp[16];
+	R_CurrentMVP(mvp);
+
+	GLboolean blend_was_on = glIsEnabled(GL_BLEND);
+	if (alpha < 1.0f) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
+
+	GLShader_Use(&R_WorldWaterShader);
+	glUniformMatrix4fv(R_WorldWaterShader_u_mvp, 1, GL_FALSE, mvp);
+	glUniform1i       (R_WorldWaterShader_u_tex, 0);
+	glUniform1f       (R_WorldWaterShader_u_time, (float)realtime);
+	glUniform1f       (R_WorldWaterShader_u_alpha, alpha);
+
+	glActiveTexture(GL_TEXTURE0);
+	for (int i = 0; i < nranges; ++i)
+	{
+		glBindTexture(GL_TEXTURE_2D, ranges[i].t->gl_texturenum);
+		Prof_CountDraw(ranges[i].count);
+		glDrawArrays(GL_TRIANGLES, vertex_offset + ranges[i].first, ranges[i].count);
+	}
+
+	if (!blend_was_on && alpha < 1.0f) glDisable(GL_BLEND);
+	glBindVertexArray(0);
+	glUseProgram(0);
 }
 
 float	r_world_matrix[16];
+
+static void R_EmitTextureChains (void); // forward decl; def below
 
 /*
 =================
@@ -693,16 +797,25 @@ void R_SetupBrushPolys (entity_t *e)
 		}
 	}
 
-    glPushMatrix ();
+	MatStack_Push(&r_modelview);
 
-	glTranslatef (e->origin[0], e->origin[1], e->origin[2]);
-	glRotatef (e->angles[1], 0, 0, 1);
-	glRotatef (e->angles[0], 0, 1, 0);	// stupid quake bug
-	glRotatef (e->angles[2], 1, 0, 0);
+	MatStack_MulTranslate(&r_modelview, e->origin[0], e->origin[1], e->origin[2]);
+	MatStack_MulRotate(&r_modelview, e->angles[1], 0, 0, 1);
+	MatStack_MulRotate(&r_modelview, e->angles[0], 0, 1, 0);	// stupid quake bug
+	MatStack_MulRotate(&r_modelview, e->angles[2], 1, 0, 0);
 
 	//
 	// draw texture
 	//
+	// Opaque surfaces are chained onto their texture's texturechain and
+	// emitted in one pass by R_EmitTextureChains below -- same path as the
+	// world model, which cuts brush-entity draws from ~1 per surface to
+	// ~1 per (texture, lightmap).
+	//
+	// Surfaces on alpha-blended entities or fence textures still go through
+	// the per-surface R_DrawBrushMTexTrans path, because they need blend
+	// state the opaque shader can't provide. Those are usually few.
+	qboolean entity_alpha = (e->alpha != 1);
 	for (i=0 ; i<clmodel->nummodelsurfaces ; i++, psurf++)
 	{
 	// find which side of the node we are on
@@ -716,14 +829,26 @@ void R_SetupBrushPolys (entity_t *e)
 		{
 			R_RenderDynamicLightmaps(psurf);
 
-			if ((e->alpha != 1) || (psurf->texinfo->texture->transparent))
+			if (entity_alpha || psurf->texinfo->texture->transparent)
+			{
 				R_DrawBrushMTexTrans (psurf, e->alpha);
+			}
 			else
-				R_DrawBrushMTex (psurf);
+			{
+				// Chain onto the (animated) texture for batched emit below.
+				texture_t *t = R_TextureAnimation (psurf->texinfo->texture);
+				psurf->texturechain = t->texturechain;
+				t->texturechain = psurf;
+			}
 		}
 	}
 
-	glPopMatrix ();
+	// Emit batched opaque draws for this entity, then pop its transform.
+	// R_EmitTextureChains reads MVP from the matrix stack, so the entity's
+	// translation/rotation we just pushed is applied to the draws.
+	R_EmitTextureChains ();
+
+	MatStack_Pop(&r_modelview);
 }
 
 /*
@@ -826,7 +951,11 @@ void R_RecursiveWorldNode (mnode_t *node)
 				}
 				else
 				{
-					R_DrawBrushMTex (surf);
+					// Batched path: chain the surface onto its (possibly animated)
+					// texture. A single draw per texture is emitted after the walk.
+					texture_t *t = R_TextureAnimation (surf->texinfo->texture);
+					surf->texturechain = t->texturechain;
+					t->texturechain = surf;
 				}
 
 				R_RenderDynamicLightmaps(surf);
@@ -840,6 +969,264 @@ void R_RecursiveWorldNode (mnode_t *node)
 
 extern char skyname[];
 
+// ---------------------------------------------------------------------------
+// Batched world draw. After R_RecursiveWorldNode has chained every visible
+// opaque surface onto its texture_t::texturechain, we walk texture by texture
+// and emit one draw per (texture, lightmap) group.
+//
+// Why batch by lightmap page too: every surface stores lightmap data in one of
+// MAX_LIGHTMAPS (=512) 128x128 pages. The shader binds the lightmap to unit 1
+// and the diffuse to unit 0. Different lightmaps => different binding => can't
+// share a draw. In practice each texture covers a handful of lightmap pages.
+//
+// The heavy lifting -- lightmap upload, fullbright pass, caustics -- is reused
+// from the per-surface path but invoked at batch granularity.
+// ---------------------------------------------------------------------------
+
+static int surf_triangulate (msurface_t *s, world_vtx_t *out)
+{
+	glpoly_t *p = s->polys;
+	int numverts = p->numverts;
+	if (numverts > WORLD_MAX_VERTS / 3) numverts = WORLD_MAX_VERTS / 3;
+	if (numverts < 3) return 0;
+
+	static world_vtx_t fan[WORLD_MAX_VERTS];
+	float *v = p->verts[0];
+	for (int k = 0; k < numverts; ++k, v += VERTEXSIZE)
+	{
+		fan[k].x = v[0]; fan[k].y = v[1]; fan[k].z = v[2];
+		fan[k].s = v[3]; fan[k].t = v[4];
+		fan[k].lm_s = v[5]; fan[k].lm_t = v[6];
+	}
+
+	int n = 0;
+	for (int k = 1; k < numverts - 1; ++k)
+	{
+		out[n++] = fan[0];
+		out[n++] = fan[k];
+		out[n++] = fan[k + 1];
+	}
+	return n;
+}
+
+static void upload_lightmap_if_dirty (int lmidx)
+{
+	if (!lightmap_modified[lmidx]) return;
+	lightmap_modified[lmidx] = false;
+	glRect_t *theRect = &lightmap_rectchange[lmidx];
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, lightmap_textures[lmidx]);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, theRect->t, BLOCK_WIDTH, theRect->h,
+		lightmap_format, GL_UNSIGNED_BYTE,
+		lightmaps+(lmidx * BLOCK_HEIGHT + theRect->t) * BLOCK_WIDTH * lightmap_bytes);
+	theRect->l = BLOCK_WIDTH;
+	theRect->t = BLOCK_HEIGHT;
+	theRect->h = 0;
+	theRect->w = 0;
+}
+
+// qsort comparator for an array of msurface_t* by lightmaptexturenum
+static int cmp_surf_by_lm (const void *a, const void *b)
+{
+	msurface_t *sa = *(msurface_t * const *)a;
+	msurface_t *sb = *(msurface_t * const *)b;
+	return sa->lightmaptexturenum - sb->lightmaptexturenum;
+}
+
+// Per-draw range, refers to a subrange of the single world-soup upload.
+typedef struct {
+	int        first;        // first vertex in world_soup
+	int        count;        // triangle vertex count (multiple of 3)
+	int        lightmap;     // lightmap page to bind
+	texture_t *t;            // diffuse texture + shader selection
+} world_draw_range_t;
+
+static void R_EmitTextureChains (void)
+{
+	if (!cl.worldmodel) return;
+	World_EnsureVBO();
+
+	// ---- collect phase ----
+	// Build ONE giant vertex buffer for all opaque world surfaces this frame,
+	// and remember the draw ranges. We upload that once and then emit many
+	// glDrawArrays(first, count) calls -- no VBO orphan per batch, no driver
+	// reallocation per texture group. This is the whole win over the
+	// per-surface path.
+	static world_vtx_t world_soup[WORLD_MAX_VERTS];
+	static world_draw_range_t ranges[4096];
+	static world_draw_range_t fb_ranges[4096]; // fullbright pass ranges
+	int nverts = 0;
+	int nranges = 0;
+	int nfb_ranges = 0;
+
+	enum { SURF_BATCH_MAX = 8192 };
+	static msurface_t *surfs[SURF_BATCH_MAX];
+
+	for (int tnum = 0; tnum < cl.worldmodel->numtextures; ++tnum)
+	{
+		texture_t *base = cl.worldmodel->textures[tnum];
+		if (!base || !base->texturechain) continue;
+		texture_t *t = base;
+
+		// Gather + sort this texture's surfaces by lightmap page.
+		int nsurfs = 0;
+		for (msurface_t *s = t->texturechain; s && nsurfs < SURF_BATCH_MAX; s = s->texturechain)
+			surfs[nsurfs++] = s;
+		t->texturechain = NULL;
+		if (nsurfs == 0) continue;
+		qsort(surfs, nsurfs, sizeof(surfs[0]), cmp_surf_by_lm);
+
+		// Walk lightmap groups within this texture. Also append fullbright
+		// ranges so we can re-emit them in a second pass without rebuilding
+		// the vertex data.
+		int fb_start = -1, fb_count = 0;
+		qboolean wants_fb = (t->fullbrights != -1 && gl_fbr.value);
+
+		int gstart = 0;
+		while (gstart < nsurfs)
+		{
+			int lm = surfs[gstart]->lightmaptexturenum;
+			int gend = gstart + 1;
+			while (gend < nsurfs && surfs[gend]->lightmaptexturenum == lm) gend++;
+
+			int range_first = nverts;
+			for (int i = gstart; i < gend; ++i)
+			{
+				if (nverts + 30 > WORLD_MAX_VERTS) break; // per-surface safety
+				world_vtx_t stagger[128];
+				int add = surf_triangulate(surfs[i], stagger);
+				if (add == 0 || nverts + add > WORLD_MAX_VERTS) break;
+				memcpy(world_soup + nverts, stagger, add * sizeof(world_vtx_t));
+				nverts += add;
+			}
+			int range_count = nverts - range_first;
+			if (range_count > 0 && nranges < 4096)
+			{
+				world_draw_range_t *r = &ranges[nranges++];
+				r->first    = range_first;
+				r->count    = range_count;
+				r->lightmap = lm;
+				r->t        = t;
+
+				if (wants_fb) {
+					if (fb_start < 0) fb_start = range_first;
+					fb_count += range_count;
+				}
+			}
+			gstart = gend;
+		}
+
+		// One merged fullbright range per texture (lightmap binding doesn't
+		// matter for fullbrights, so we don't need to split by lm).
+		if (wants_fb && fb_count > 0 && nfb_ranges < 4096) {
+			world_draw_range_t *r = &fb_ranges[nfb_ranges++];
+			r->first = fb_start;
+			r->count = fb_count;
+			r->lightmap = -1;
+			r->t = t;
+		}
+
+		// Caustics still per-surface: unusual path, very few surfaces normally.
+		if (gl_caustics.value)
+		{
+			for (int i = 0; i < nsurfs; ++i)
+				if (surfs[i]->flags & SURF_UNDERWATER)
+					EmitCausticsPolys(surfs[i]);
+		}
+	}
+
+	if (nverts == 0) return;
+
+	// ---- upload phase: ring-streaming, no orphan stall ----
+	// world_vbo is sized for several frames of geometry; UploadStream writes
+	// at the current head and bumps it, so the GPU can still be reading an
+	// earlier region of the same buffer without forcing a CPU wait.
+	GLsizei byte_offset = DynamicVBO_UploadStream(&world_vbo, world_soup,
+	                                              (GLsizei)(nverts * sizeof(world_vtx_t)));
+	GLsizei vertex_offset = byte_offset / (GLsizei)sizeof(world_vtx_t);
+	DynamicVBO_Bind(&world_vbo);
+
+	float mvp[16];
+	R_CurrentMVP(mvp);
+
+	// ---- emit phase 1: opaque / fence draws ----
+	texture_t *last_t  = NULL;
+	qboolean   last_fence = false;
+	int        last_lm = -1;
+	for (int i = 0; i < nranges; ++i)
+	{
+		world_draw_range_t *r = &ranges[i];
+		texture_t *t = r->t;
+		qboolean fence = t->transparent != 0;
+
+		if (t != last_t || fence != last_fence)
+		{
+			if (fence) { if (!R_EnsureWorldFenceShader()) continue; }
+			else       { if (!R_EnsureWorldOpaqueShader()) continue; }
+			GLShader *sh = fence ? &R_WorldFenceShader : &R_WorldOpaqueShader;
+			GLint u_mvp = fence ? R_WorldFenceShader_u_mvp : R_WorldOpaqueShader_u_mvp;
+			GLint u_tex = fence ? R_WorldFenceShader_u_tex : R_WorldOpaqueShader_u_tex;
+			GLint u_lm  = fence ? R_WorldFenceShader_u_lightmap : R_WorldOpaqueShader_u_lightmap;
+			GLint u_a   = fence ? R_WorldFenceShader_u_alpha : R_WorldOpaqueShader_u_alpha;
+			GLShader_Use(sh);
+			glUniformMatrix4fv(u_mvp, 1, GL_FALSE, mvp);
+			glUniform1i(u_tex, 0);
+			glUniform1i(u_lm, 1);
+			glUniform1f(u_a, 1.0f);
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, t->gl_texturenum);
+			last_t = t;
+			last_fence = fence;
+			last_lm = -1; // force lightmap rebind after texture switch
+		}
+
+		if (r->lightmap != last_lm)
+		{
+			upload_lightmap_if_dirty(r->lightmap);
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, lightmap_textures[r->lightmap]);
+			glActiveTexture(GL_TEXTURE0);
+			last_lm = r->lightmap;
+		}
+
+		Prof_CountDraw(r->count);
+		glDrawArrays(GL_TRIANGLES, vertex_offset + r->first, r->count);
+	}
+
+	// ---- emit phase 2: fullbright additive overlays ----
+	if (nfb_ranges > 0 && R_EnsureWorldFullbrightShader())
+	{
+		GLboolean blend_was_on = glIsEnabled(GL_BLEND);
+		GLint     blend_src, blend_dst;
+		glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend_src);
+		glGetIntegerv(GL_BLEND_DST_ALPHA, &blend_dst);
+
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE);
+		glDepthFunc(GL_LEQUAL);
+		GLShader_Use(&R_WorldFullbrightShader);
+		glUniformMatrix4fv(R_WorldFullbrightShader_u_mvp, 1, GL_FALSE, mvp);
+		glUniform1i(R_WorldFullbrightShader_u_tex, 0);
+
+		texture_t *fb_last_t = NULL;
+		for (int i = 0; i < nfb_ranges; ++i)
+		{
+			world_draw_range_t *r = &fb_ranges[i];
+			if (r->t != fb_last_t)
+			{
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, r->t->fullbrights);
+				fb_last_t = r->t;
+			}
+			Prof_CountDraw(r->count);
+			glDrawArrays(GL_TRIANGLES, vertex_offset + r->first, r->count);
+		}
+
+		glBlendFunc((GLenum)blend_src, (GLenum)blend_dst);
+		if (!blend_was_on) glDisable(GL_BLEND);
+	}
+}
+
 /*
 =============
 R_DrawWorld
@@ -849,6 +1236,8 @@ R_DrawWorld
 void R_DrawWorld (void)
 {
 	entity_t	ent;
+
+	Prof_BeginSection (PROF_WORLD_OPAQUE);
 
 	memset (&ent, 0, sizeof(ent));
 	ent.model = cl.worldmodel;
@@ -860,6 +1249,11 @@ void R_DrawWorld (void)
 	memset (lightmap_polys, 0, sizeof(lightmap_polys));
 
 	R_RecursiveWorldNode (cl.worldmodel->nodes);
+
+	// Emit one draw per (texture, lightmap) group, batching the many per-
+	// surface draws the old path produced. This is the whole point of the
+	// batching refactor.
+	R_EmitTextureChains ();
 
 	if (skychain)
 	{
@@ -873,7 +1267,9 @@ void R_DrawWorld (void)
 		}
 		skychain = NULL;
 	}
-}	
+
+	Prof_EndSection (PROF_WORLD_OPAQUE);
+}
 
 
 /*
@@ -1131,11 +1527,8 @@ void GL_BuildLightmaps (void)
 
 	r_framecount = 1;		// no dlightcache
 
-	if (!lightmap_textures)
-	{
-		lightmap_textures = texture_extension_number;
-		texture_extension_number += MAX_LIGHTMAPS;
-	}
+	if (!lightmap_textures[0])
+		glGenTextures(MAX_LIGHTMAPS, lightmap_textures);
 
 	for (j=1 ; j<MAX_MODELS ; j++)
 	{
@@ -1156,8 +1549,9 @@ void GL_BuildLightmaps (void)
 			BuildSurfaceDisplayList (m->surfaces + i);
 		}
 	}
- 	if (gl_mtexable)
-		qglSelectTextureSGIS_ARB(TEXTURE1_SGIS_ARB);
+	// Lightmaps live on texture unit 1 (unit 0 is diffuse). Switch to unit 1
+	// so the binds/uploads below target the right slot.
+	glActiveTexture(GL_TEXTURE1);
 
 	//
 	// upload all lightmaps that were filled
@@ -1171,13 +1565,14 @@ void GL_BuildLightmaps (void)
 		lightmap_rectchange[i].t = BLOCK_HEIGHT;
 		lightmap_rectchange[i].w = 0;
 		lightmap_rectchange[i].h = 0;
-		glBindTexture (GL_TEXTURE_2D, lightmap_textures + i);
+		glBindTexture (GL_TEXTURE_2D, lightmap_textures[i]);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexImage2D (GL_TEXTURE_2D, 0, lightmap_bytes
-			, BLOCK_WIDTH, BLOCK_HEIGHT, 0, lightmap_format, GL_UNSIGNED_BYTE, lightmaps+i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+		// Core profile rejects the legacy numeric internal format (was 4);
+		// GL_RGBA8 is the modern sized format matching lightmap_format=GL_RGBA.
+		glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8,
+			BLOCK_WIDTH, BLOCK_HEIGHT, 0, lightmap_format, GL_UNSIGNED_BYTE, lightmaps+i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 	}
 
- 	if (gl_mtexable)
-		qglSelectTextureSGIS_ARB(TEXTURE0_SGIS_ARB);
+	glActiveTexture(GL_TEXTURE0);
 }

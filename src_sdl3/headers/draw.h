@@ -27,6 +27,7 @@ void Draw_Init (void);
 void Draw_Character (int x, int y, int num);
 void Draw_BeginCharBatch (void);
 void Draw_EndCharBatch (void);
+void Draw_SetCharColor (float r, float g, float b, float a);
 void Draw_Pic (int x, int y, qpic_t *pic);
 void Draw_MenuPlayer (int x, int y, qpic_t *pic, byte *translation);
 void Draw_ConsoleBackground (int lines);

@@ -159,21 +159,17 @@ void M_DrawSlider (int x, int y, float range)
 
 void M_DrawCheckbox (int x, int y, int on)
 {
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
 	if (on)
 	{
-		glColor3f(0,1,0);
+		Draw_SetCharColor(0, 1, 0, 1);
 		M_Print (x, y, "on");
 	}
 	else
 	{
-		glColor3f(1,0,0);
+		Draw_SetCharColor(1, 0, 0, 1);
 		M_Print (x, y, "off");
 	}
-
-	glColor3f(1,1,1);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+	Draw_SetCharColor(1, 1, 1, 1);
 }
 
 /*

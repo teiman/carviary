@@ -10,7 +10,7 @@ const dataDir = path.join(carviaryDir, "data");
 console.log("Running carviary profile...\n");
 
 try {
-  execSync(".\\carviary.exe -disablevsync +max_fps 1000 +profile demo1", {
+  execSync(".\\carviary_sdl3.exe +vid_vsync 0 +profile demo1", {
     cwd: quakeDir,
     stdio: "inherit",
   });

@@ -80,9 +80,18 @@ smoothly scrolled off.
 ================
 */
 // Current color applied by Draw_Character (set via glColor-equivalent in the
-// string parser; kept in a static so the batched path can respect it).
-static float char_color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+// string parser; kept here so the batched path can respect it).
+float char_color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 static qboolean char_batching = false;
+
+// External setter used by console / menu (replaces glColor3f calls).
+void Draw_SetCharColor (float r, float g, float b, float a)
+{
+	char_color[0] = r;
+	char_color[1] = g;
+	char_color[2] = b;
+	char_color[3] = a;
+}
 
 void Draw_BeginCharBatch (void)
 {

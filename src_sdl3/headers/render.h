@@ -164,10 +164,6 @@ void GL_Set2D (void);
 void Draw_MapShots(void);
 void Draw_Crosshair (int num);
 
-// Depth of Field
-void DOF_Init (void);
-void DOF_Apply (void);
-
 byte *loadimagepixels (char* filename, qboolean complain);
 int  loadtextureimage (char* filename, qboolean complain, qboolean mipmap);
 int  loadtextureimage3 (char* filename, qboolean complain, qboolean mipmap, byte *data);

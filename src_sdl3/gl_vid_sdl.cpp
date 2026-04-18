@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "sdlquake.h"
+#include "gl_mat4.h"
 
 // ---------------------------------------------------------------------------
 // SDL3 window / GL context
@@ -66,7 +67,6 @@ unsigned short	d_8to16table[256];
 // ---------------------------------------------------------------------------
 // Texture management
 // ---------------------------------------------------------------------------
-int		texture_extension_number = 1;
 int		texture_mode = GL_LINEAR;
 
 BINDTEXFUNCPTR		bindTexFunc;
@@ -90,16 +90,7 @@ const char	*gl_extensions;
 // Cvars
 // ---------------------------------------------------------------------------
 cvar_t	gl_ztrick = {"gl_ztrick", "0", true};
-
-// ---------------------------------------------------------------------------
-// Multitexture
-// ---------------------------------------------------------------------------
-qboolean		gl_mtexable = false;
-
-GLenum	TEXTURE0_SGIS_ARB = TEXTURE0_ARB;
-GLenum	TEXTURE1_SGIS_ARB = TEXTURE1_ARB;
-
-// qglMTexCoord2fSGIS_ARB and qglSelectTextureSGIS_ARB defined in gl_rsurf.cpp
+cvar_t	vid_vsync = {"vid_vsync", "1", true}; // 1=on (wait for vblank), 0=off (uncapped)
 
 // ---------------------------------------------------------------------------
 // Current window size tracking
@@ -209,6 +200,10 @@ static void GL_Init (void)
 	Con_Printf("GL_RENDERER: %s\n",   gl_renderer);
 	Con_Printf("GL_VERSION: %s\n",    gl_version);
 
+	// CPU-side matrix stacks used by the renderer.
+	MatStack_Init(&r_modelview);
+	MatStack_Init(&r_projection);
+
 	// ------ bind texture function pointers ------
 	// In the SDL3 port these are directly available from GL headers.
 	bindTexFunc      = (BINDTEXFUNCPTR)glBindTexture;
@@ -218,29 +213,16 @@ static void GL_Init (void)
 	// ------ default GL state ------
 	glClearColor(0, 0, 0, 0);
 	glCullFace(GL_FRONT);
-	glEnable(GL_TEXTURE_2D);
-
-	glEnable(GL_ALPHA_TEST);
-	glAlphaFunc(GL_GREATER, 0.666f);
-
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	glShadeModel(GL_SMOOTH);
 
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-	glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
-	glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
-
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 
 	glEnable(GL_CULL_FACE);
 	glEnable(GL_BLEND);
-	glDisable(GL_ALPHA_TEST);
 
 	// ------ depth ------
 	glEnable(GL_DEPTH_TEST);
@@ -249,38 +231,6 @@ static void GL_Init (void)
 	gldepthmax = 1.0f;
 	glDepthRange(gldepthmin, gldepthmax);
 
-	// ------ multitexture extension ------
-	gl_mtexable = false;
-
-	if (gl_extensions && strstr(gl_extensions, "GL_ARB_multitexture"))
-	{
-		qglMTexCoord2fSGIS_ARB = (lpMTexFUNC)SDL_GL_GetProcAddress("glMultiTexCoord2fARB");
-		qglSelectTextureSGIS_ARB = (lpSelTexFUNC)SDL_GL_GetProcAddress("glActiveTextureARB");
-
-		if (qglMTexCoord2fSGIS_ARB && qglSelectTextureSGIS_ARB)
-		{
-			TEXTURE0_SGIS_ARB = TEXTURE0_ARB;
-			TEXTURE1_SGIS_ARB = TEXTURE1_ARB;
-			gl_mtexable = true;
-			Con_Printf("ARB multitexture extensions found.\n");
-		}
-	}
-	else if (gl_extensions && strstr(gl_extensions, "GL_SGIS_multitexture"))
-	{
-		qglMTexCoord2fSGIS_ARB = (lpMTexFUNC)SDL_GL_GetProcAddress("glMTexCoord2fSGIS");
-		qglSelectTextureSGIS_ARB = (lpSelTexFUNC)SDL_GL_GetProcAddress("glSelectTextureSGIS");
-
-		if (qglMTexCoord2fSGIS_ARB && qglSelectTextureSGIS_ARB)
-		{
-			TEXTURE0_SGIS_ARB = TEXTURE0_SGIS;
-			TEXTURE1_SGIS_ARB = TEXTURE1_SGIS;
-			gl_mtexable = true;
-			Con_Printf("SGIS multitexture extensions found.\n");
-		}
-	}
-
-	if (!gl_mtexable)
-		Con_Printf("Multitexture not supported.\n");
 }
 
 // =========================================================================
@@ -293,6 +243,7 @@ void VID_Init (unsigned char *palette)
 	int		p;
 
 	Cvar_RegisterVariable(&gl_ztrick);
+	Cvar_RegisterVariable(&vid_vsync);
 
 	// Default to desktop resolution (borderless fullscreen)
 	const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
@@ -328,12 +279,11 @@ void VID_Init (unsigned char *palette)
 	currentHeight = height;
 
 	// ----- SDL GL attributes -----
-	// Request GL 3.3 compatibility profile during the GL 1.x -> 3.3 core migration.
-	// Compatibility keeps legacy fixed-function working while we port file-by-file;
-	// switch to CORE once no GL 1.x calls remain.
+	// OpenGL 3.3 Core: no fixed-function fallback. Every draw must go through
+	// a shader + VBO + VAO.
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
@@ -363,8 +313,10 @@ void VID_Init (unsigned char *palette)
 	if (!GLAD_GL_VERSION_3_3)
 		Sys_Error("OpenGL 3.3 not available on this system");
 
-	// enable vsync (swap interval 1); ignore failure
-	SDL_GL_SetSwapInterval(1);
+	// vsync: driven by vid_vsync cvar, can be toggled at runtime.
+	// We read the cvar rather than hardcoding 1 so a saved config with
+	// vid_vsync=0 takes effect on startup.
+	SDL_GL_SetSwapInterval(vid_vsync.value ? 1 : 0);
 
 	// ----- set up engine video globals -----
 	vid.width	= width;
@@ -412,6 +364,16 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 // =========================================================================
 void GL_EndRendering (void)
 {
+	// Re-apply vsync only when the cvar changes. SetSwapInterval is a
+	// cheap call but we still avoid it every frame for cleanliness.
+	static int last_vsync = -1;
+	int want = vid_vsync.value ? 1 : 0;
+	if (want != last_vsync)
+	{
+		SDL_GL_SetSwapInterval(want);
+		last_vsync = want;
+	}
+
 	SDL_GL_SwapWindow(sdl_window);
 }
 

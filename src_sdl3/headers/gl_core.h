@@ -38,6 +38,7 @@ typedef struct DynamicVBO_s {
 	GLuint vao;
 	GLuint vbo;
 	GLsizei capacity;   // bytes
+	GLsizei head;       // next write offset (ring-streaming path)
 } DynamicVBO;
 
 // Create a VAO+VBO pair sized for `capacity_bytes` of vertex data.
@@ -50,7 +51,18 @@ void DynamicVBO_SetAttrib(DynamicVBO *d, GLuint index, GLint components, GLenum 
                           GLboolean normalized, GLsizei stride, size_t offset);
 
 // Upload `nbytes` of vertex data, orphaning the old buffer first (streaming).
+// Simple path: small buffers where orphan-per-upload cost is negligible.
 void DynamicVBO_Upload(DynamicVBO *d, const void *data, GLsizei nbytes);
+
+// Ring-streaming upload: writes `nbytes` into the buffer at a fresh offset
+// without orphaning the whole buffer each call. The driver only stalls when
+// the ring wraps back and the GPU hasn't finished that region yet -- which
+// for a 2MB buffer holding ~100us of vertex data basically never happens
+// at normal framerates. Returns the byte offset the data was written at,
+// for use as `glDrawArrays(GL_TRIANGLES, first/vertex_stride, count)`.
+// Use this for per-frame large world/warp uploads where the naive orphan
+// path serializes the CPU thread behind driver uploads.
+GLsizei DynamicVBO_UploadStream(DynamicVBO *d, const void *data, GLsizei nbytes);
 
 // Bind VAO so a subsequent glDrawArrays/Elements uses this buffer.
 void DynamicVBO_Bind(const DynamicVBO *d);

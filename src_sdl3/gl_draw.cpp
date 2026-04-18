@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_mat4.h"
 
 //
 // Structures
@@ -71,8 +72,10 @@ int			translate_texture;
 extern int	char_texture;
 int			map_snapshot;			// MapShots
 int			map_snapname;			// MapShots
-int			gl_solid_format = 3;
-int			gl_alpha_format = 4;
+// Core profile rejects the legacy numeric formats (3/4). Use the proper
+// sized internal formats so glTexImage2D succeeds.
+int			gl_solid_format = GL_RGB8;
+int			gl_alpha_format = GL_RGBA8;
 int			menu_numcachepics;
 int			pic_texels;
 int			pic_count;
@@ -296,7 +299,11 @@ void Draw_Init (void)
 	//
 	// Save a texture slot for translated picture
 	//
-	translate_texture = texture_extension_number++;
+	{
+		GLuint id = 0;
+		glGenTextures(1, &id);
+		translate_texture = (int)id;
+	}
 
 	//
 	// Get the other pics we need
@@ -507,13 +514,10 @@ void GL_Set2D (void)
 {
 	glViewport (glx, gly, glwidth, glheight);
 
-	glMatrixMode(GL_PROJECTION);
-    glLoadIdentity ();
-	glOrtho  (0, vid.width, vid.height, 0, -99999, 99999);
+	MatStack_LoadIdentity(&r_projection);
+	mat4_ortho(MatStack_Top(&r_projection), 0.0f, (float)vid.width, (float)vid.height, 0.0f, -99999.0f, 99999.0f);
 
-	glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity ();
+	MatStack_LoadIdentity(&r_modelview);
+
 	glDisable (GL_DEPTH_TEST);
-
-	glColor4f (1,1,1,1);
 }

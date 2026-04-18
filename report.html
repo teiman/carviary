@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>carviary profile report</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 24px 32px; background: #0e1116; color: #e6edf3; }
+  h1, h2 { margin: 0 0 8px 0; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #30363d; padding-bottom: 4px; }
+  .meta { color: #8b949e; font-size: 13px; margin-bottom: 12px; }
+  .meta span { margin-right: 18px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .chart-box { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px; height: 340px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+  th, td { padding: 4px 8px; border-bottom: 1px solid #21262d; text-align: right; }
+  th { background: #161b22; position: sticky; top: 0; }
+  td.sec { text-align: left; color: #79c0ff; font-weight: 600; }
+  td.na { text-align: center; color: #6e7681; }
+  .num { color: #c9d1d9; }
+  .derived { color: #7ee787; font-weight: 600; background: #0d1f14; }
+  .derived-header { background: #0d1f14 !important; color: #7ee787 !important; }
+  .group { border-left: 1px solid #30363d; }
+  .finding { background: #161b22; border: 1px solid #30363d; border-left: 4px solid #30363d; border-radius: 4px; padding: 10px 14px; margin: 8px 0; }
+  .sev-issue { border-left-color: #f85149; }
+  .sev-warn  { border-left-color: #d29922; }
+  .sev-info  { border-left-color: #58a6ff; }
+  .finding-title { font-weight: 600; }
+  .finding-detail { color: #8b949e; font-size: 13px; margin-top: 4px; }
+  .sev { display: inline-block; text-transform: uppercase; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-right: 8px; background: #30363d; color: #c9d1d9; letter-spacing: 0.5px; }
+  .review-item { background: #0b1a2b; border: 1px solid #1f6feb; border-left-width: 4px; border-radius: 4px; padding: 12px 16px; margin: 10px 0; }
+  .review-heading { font-weight: 600; color: #79c0ff; margin-bottom: 6px; }
+  .review-body { color: #c9d1d9; font-size: 13px; line-height: 1.5; }
+  .plain-item { background: #0f2415; border: 1px solid #238636; border-left-width: 4px; border-radius: 4px; padding: 14px 18px; margin: 12px 0; }
+  .plain-tldr { font-weight: 700; color: #7ee787; margin-bottom: 8px; font-size: 15px; }
+  .plain-body { color: #e6edf3; font-size: 14px; line-height: 1.6; }
+  pre.digest { background: #010409; border: 1px solid #30363d; padding: 12px; overflow: auto; max-height: 420px; font-size: 12px; border-radius: 6px; }
+  details summary { cursor: pointer; color: #8b949e; margin: 12px 0 6px; }
+  .hint { color: #8b949e; font-size: 12px; margin: 6px 0 14px; }
+</style>
+</head>
+<body>
+  <h1>carviary profile report</h1>
+  <div class="meta">
+    <span>build: <b>carviary</b></span>
+    <span>gl: <b>3.3.0 NVIDIA 595.97</b></span>
+    <span>demo: <b></b></span>
+    <span>map: <b>Place of Many Deaths</b></span>
+    <span>res: <b>1920x1080</b></span>
+    <span>samples: <b>62</b></span>
+  </div>
+
+  <h2>En cristiano (sin jerga)</h2>
+  <div class="hint">Las conclusiones principales, explicadas como se las contarias a alguien que no sabe de rendering.</div>
+  <div class="plain-item">
+      <div class="plain-tldr">El motor va sobrado de GPU.</div>
+      <div class="plain-body">La GPU solo trabaja unos 16.5 ms por frame. El monitor dibuja un frame cada 16.7 ms (60 veces por segundo). Sobra muchísimo tiempo. La GPU pasa más del 90% del frame esperando al monitor.</div>
+    </div>
+<div class="plain-item">
+      <div class="plain-tldr">Los números de frame_total y swap no sirven para comparar.</div>
+      <div class="plain-body">Son fijos: siempre valen lo mismo porque están atados al monitor. Si cambias código y el número no se mueve, no significa que no hayas mejorado. Mira las otras filas (world_opaque, viewmodel, etc.) — esas sí reaccionan a cambios de código.</div>
+    </div>
+<div class="plain-item">
+      <div class="plain-tldr">Lo que más cuesta en GPU es el mundo (paredes y suelo).</div>
+      <div class="plain-body">world_opaque se lleva alrededor del 92% del trabajo de la GPU entre todas las fases medidas. Si algún día el motor va lento, ese es el primer sitio donde mirar.</div>
+    </div>
+<div class="plain-item">
+      <div class="plain-tldr">Dentro del 3D, lo que más CPU come es sprites (~0.1 ms).</div>
+      <div class="plain-body">Hemos desglosado el render 3D en partes. La que más tarda en CPU ahora mismo es "cpu_sprite" (sprites): 0.1 ms. Si algún día quieres que el motor vaya más rápido en CPU, es el primer sitio donde hay que mirar.</div>
+    </div>
+<div class="plain-item">
+      <div class="plain-tldr">Los ~0.5 ms 'sin explicar' no son trabajo, son espera.</div>
+      <div class="plain-body">La fase "scene" marca ~16.7 ms de CPU, pero las subfases que medimos dentro suman mucho menos. La diferencia es tiempo *esperando*, no trabajando: el hilo se bloquea (en audio, en sincronización con la GPU, en vsync). Son milisegundos fantasma. La suma de las subfases (world_opaque + cpu_water + cpu_particles + ...) es el coste real de CPU del render 3D.</div>
+    </div>
+<div class="plain-item">
+      <div class="plain-tldr">Para comparar builds usa la columna us/draw (verde, al final de la tabla grande).</div>
+      <div class="plain-body">Más abajo en esta página hay una tabla enorme con todas las fases y sus números. Las dos últimas columnas están resaltadas en verde: "us/draw gpu" y "us/draw cpu". Es microsegundos por draw call — el coste de dibujar una cosa cualquiera. Cuando cambies código y quieras saber si mejoraste, compara esa columna entre builds. Si baja, optimizaste de verdad. Si solo baja el tiempo total pero esa columna sube, no optimizaste: simplemente había menos cosas en pantalla.</div>
+    </div>
+
+  <h2>Automated analysis</h2>
+  <div class="hint">Heuristics computed from percentile stats. Not a substitute for judgement.</div>
+  <div class="finding sev-warn">
+      <div class="finding-title"><span class="sev">warn</span> scene.cpu_us.p50 (16709us) is pinned to ~vsync — the number is the stall, not the work</div>
+      <div class="finding-detail">Measured CPU time for scene sits inside a vsync period (~16-17ms). The instrumented children sum to only 16211us (world_opaque=16048, cpu_mark_leaves=0, cpu_trans_setup=50, cpu_water=0, cpu_particles=16, cpu_alias=36, cpu_sprite=54, cpu_brush_trans=7). The "missing" 498us is almost certainly wall-clock time spent waiting somewhere -- either S_ExtraUpdate(), a driver sync, or the GL pipeline flushing. Trust the per-child numbers, not scene.cpu_us itself. The real CPU cost of the 3D render is closer to 16211us than to 16709us.</div>
+    </div>
+<div class="finding sev-warn">
+      <div class="finding-title"><span class="sev">warn</span> world_opaque.gpu_us p95/p50 = 22.3x (spiky)</div>
+      <div class="finding-detail">p50=327, p95=7301. A few sampled frames cost several times more than the median. Common causes: texture upload, shader compile, GC/ hunk alloc, variable geometry (alias model swaps). Investigate max-frame samples.</div>
+    </div>
+<div class="finding sev-warn">
+      <div class="finding-title"><span class="sev">warn</span> viewmodel.gpu_us p95/p50 = 10.6x (spiky)</div>
+      <div class="finding-detail">p50=19, p95=201. A few sampled frames cost several times more than the median. Common causes: texture upload, shader compile, GC/ hunk alloc, variable geometry (alias model swaps). Investigate max-frame samples.</div>
+    </div>
+<div class="finding sev-warn">
+      <div class="finding-title"><span class="sev">warn</span> swap.cpu_us p95/p50 = 32.1x (spiky)</div>
+      <div class="finding-detail">p50=32, p95=1027. A few sampled frames cost several times more than the median. Common causes: texture upload, shader compile, GC/ hunk alloc, variable geometry (alias model swaps). Investigate max-frame samples.</div>
+    </div>
+<div class="finding sev-warn">
+      <div class="finding-title"><span class="sev">warn</span> cpu_alias.cpu_us p95/p50 = 25.1x (spiky)</div>
+      <div class="finding-detail">p50=36, p95=904. A few sampled frames cost several times more than the median. Common causes: texture upload, shader compile, GC/ hunk alloc, variable geometry (alias model swaps). Investigate max-frame samples.</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> GPU frame time is 82% swap / vsync wait (expected)</div>
+      <div class="finding-detail">frame_total gpu_us.mean=17574 vs swap gpu_us.mean=14448. Vsync is hard-enabled in this build (SDL_GL_SetSwapInterval(1) in gl_vid_sdl.cpp) and there is no flag to disable it. This is not a bug to fix, it is a measurement constraint: frame_total and swap numbers mean nothing for build-vs-build comparison here. Compare per-section gpu_us (clear / world_opaque / viewmodel / polyblend / hud_2d / scene) instead. Those are unaffected by vsync.</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> GPU headroom: scene p95 uses only 98.8% of the frame budget</div>
+      <div class="finding-detail">scene.gpu_us.p95=16500us, frame_total.gpu_us.p50=16692us. The actual render work fits 1x over in the frame budget -- plenty of GPU headroom. The large frame_total is vsync padding, not engine work.</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> Top GPU section (p50): world_opaque (327us, 92% of non-swap GPU)</div>
+      <div class="finding-detail">Ranking by gpu_us.p50 (excluding frame_total/scene/swap): world_opaque=327us, viewmodel=19us, hud_2d=7us, clear=2us, polyblend=1us</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> Top CPU section (p50): world_opaque (16048us)</div>
+      <div class="finding-detail">Ranking by cpu_us.p50 (excluding frame_total/scene): world_opaque=16048us, cpu_sprite=54us, cpu_trans_setup=50us, hud_2d=40us, cpu_alias=36us</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> clear: CPU-bound (cpu 818us vs gpu 2us, 409.0x)</div>
+      <div class="finding-detail">Cost lives on the CPU side — command buffer prep, state changes, BSP walks, alias model blending. GPU work itself is small. Optimization target: reduce CPU work per draw or batch more.</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> world_opaque: CPU-bound (cpu 15851us vs gpu 1288us, 12.3x)</div>
+      <div class="finding-detail">Cost lives on the CPU side — command buffer prep, state changes, BSP walks, alias model blending. GPU work itself is small. Optimization target: reduce CPU work per draw or batch more.</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> viewmodel: GPU-bound (gpu 47us vs cpu 12us, 3.9x)</div>
+      <div class="finding-detail">The GPU is the bottleneck here — likely fill rate (lots of overdraw/ large surfaces) or shader cost. Optimization target: reduce fragments (culling, smaller triangles, early-Z) or shader ops.</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> hud_2d: CPU-bound (cpu 44us vs gpu 7us, 6.3x)</div>
+      <div class="finding-detail">Cost lives on the CPU side — command buffer prep, state changes, BSP walks, alias model blending. GPU work itself is small. Optimization target: reduce CPU work per draw or batch more.</div>
+    </div>
+<div class="finding sev-info">
+      <div class="finding-title"><span class="sev">info</span> swap: GPU-bound (gpu 14448us vs cpu 143us, 101.0x)</div>
+      <div class="finding-detail">The GPU is the bottleneck here — likely fill rate (lots of overdraw/ large surfaces) or shader cost. Optimization target: reduce fragments (culling, smaller triangles, early-Z) or shader ops.</div>
+    </div>
+
+  <h2>Manual review</h2>
+  <div class="hint">Opinionated reading of the current numbers. The patterns here
+    are not captured by the automated heuristics because they require context
+    (what is being measured, how, and why a number looks wrong).</div>
+  <div class="review-item">
+      <div class="review-heading">The frame budget is not the real metric</div>
+      <div class="review-body">frame_total gpu_us.p50 is 16692us — that is just 1/60s (vsync). Of that, swap alone takes 16022us (96%). The actual render work (scene) fits in 16500us at p95, about 1x under budget. Vsync is hard-wired on in this build (SDL_GL_SetSwapInterval(1) in gl_vid_sdl.cpp has no off switch), so frame_total and swap will always look this way. That is fine — just ignore them. Compare per-section gpu_us instead; those are unaffected by vsync and show real engine work.</div>
+    </div>
+<div class="review-item">
+      <div class="review-heading">scene has a blind spot we should eliminate</div>
+      <div class="review-body">scene.cpu_us.p50 = 16709us, world_opaque.cpu_us.p50 = 16048us. That leaves ~661us inside scene that we cannot attribute to any section. It is spread across R_DrawParticles, R_DrawWaterSurfaces, R_DrawAliasModel, R_DrawSpriteModel, R_DrawBrushMTexTrans, R_MarkLeaves, R_MoveParticles, R_SetupTransEntities — none of them instrumented. Until we split these, "optimize scene" is a dartboard. Next profiler iteration should add CPU-only sections (just Sys_FloatTime) for each of those — GL query nesting isn't an issue if we only measure CPU.</div>
+    </div>
+<div class="review-item">
+      <div class="review-heading">world_opaque 'spike' is not a stall, it is more work</div>
+      <div class="review-body">world_opaque.gpu_us jumps from p50=327 to p95=7301us, which the automated heuristics flag as spiky. But draw_calls also jump from p50=812 to p95=4729. Cost per draw is 0.40us at p50 and 1.54us at p95 — essentially identical. That means the "spike" is just the PVS exposing more surfaces when the player looks into a bigger room. There is no per-draw regression to fix. Optimization target: reduce number of draws (batch surfaces, merge fans), not cost per draw.</div>
+    </div>
+<div class="review-item">
+      <div class="review-heading">polyblend CPU numbers are measurement noise</div>
+      <div class="review-body">polyblend.cpu_us.p99 = 10us, but R_PolyBlend issues at most three fullscreen quad draws — real CPU cost is under 10us. The large p99 is almost certainly vsync stall or a context switch captured by Sys_FloatTime() inside the section, not real work. Don't chase it. It also exposes a limitation of the current CPU timing: it is wall-clock, so anything that happens to block the thread during a section contaminates the sample. If this becomes a problem, replace Sys_FloatTime with QueryThreadCycleTime or a thread-time API.</div>
+    </div>
+<div class="review-item">
+      <div class="review-heading">us/draw is the metric to watch between builds</div>
+      <div class="review-body">Absolute section times move with content (PVS, entity count), so p50 alone can regress without any code change. us/draw (p50 gpu_us divided by p50 draw_calls, shown in the green column of the table) normalizes out content load: if a code change makes per-draw cost go from 0.56us to 0.71us while draw count stays the same, you just regressed. This is a better comparison knob for build-vs-build diffs than gpu_us.p50 in isolation.</div>
+    </div>
+
+  <h2>Per-section charts (p50 &amp; p95, microseconds)</h2>
+  <div class="grid2">
+    <div class="chart-box"><canvas id="gpu-chart"></canvas></div>
+    <div class="chart-box"><canvas id="cpu-chart"></canvas></div>
+  </div>
+
+  <h2>Full stats table</h2>
+  <div class="hint">Columns repeat: mean / p50 / p95 / p99 / min / max. Times in microseconds; counters absolute.</div>
+  <div style="overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th rowspan="2">section</th>
+        <th colspan="6">gpu_us</th>
+        <th colspan="6" class="group">cpu_us</th>
+        <th colspan="6" class="group">draw_calls</th>
+        <th colspan="6" class="group">tris</th>
+        <th colspan="6" class="group">frags_visible</th>
+        <th colspan="2" class="group derived-header">us/draw p50</th>
+      </tr>
+      <tr>
+        <th>mean</th><th>p50</th><th>p95</th><th>p99</th><th>min</th><th>max</th>
+        <th class="group">mean</th><th>p50</th><th>p95</th><th>p99</th><th>min</th><th>max</th>
+        <th class="group">mean</th><th>p50</th><th>p95</th><th>p99</th><th>min</th><th>max</th>
+        <th class="group">mean</th><th>p50</th><th>p95</th><th>p99</th><th>min</th><th>max</th>
+        <th class="group">mean</th><th>p50</th><th>p95</th><th>p99</th><th>min</th><th>max</th>
+        <th class="group derived-header">gpu</th><th class="derived-header">cpu</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="sec">clear</td>
+        <td class="num">2</td><td class="num">2</td><td class="num">2</td><td class="num">2</td><td class="num">0</td><td class="num">6</td>
+        <td class="num">818</td><td class="num">1</td><td class="num">50</td><td class="num">85</td><td class="num">0</td><td class="num">50458</td>
+        <td class="num">1483</td><td class="num">812</td><td class="num">4729</td><td class="num">4814</td><td class="num">0</td><td class="num">6270</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td>
+        <td class="num derived">0.00</td><td class="num derived">0.00</td>
+      </tr>
+<tr>
+        <td class="sec">world_opaque</td>
+        <td class="num">1288</td><td class="num">327</td><td class="num">7301</td><td class="num">11222</td><td class="num">0</td><td class="num">12872</td>
+        <td class="num">15851</td><td class="num">16048</td><td class="num">16989</td><td class="num">20175</td><td class="num">0</td><td class="num">26384</td>
+        <td class="num">1483</td><td class="num">812</td><td class="num">4729</td><td class="num">4814</td><td class="num">0</td><td class="num">6270</td>
+        <td class="num">4270</td><td class="num">2500</td><td class="num">13242</td><td class="num">13271</td><td class="num">0</td><td class="num">17122</td>
+        <td class="num">2338342</td><td class="num">2436739</td><td class="num">2436739</td><td class="num">2495813</td><td class="num">0</td><td class="num">2514205</td>
+        <td class="num derived">0.40</td><td class="num derived">19.76</td>
+      </tr>
+<tr>
+        <td class="sec">viewmodel</td>
+        <td class="num">47</td><td class="num">19</td><td class="num">201</td><td class="num">253</td><td class="num">0</td><td class="num">276</td>
+        <td class="num">12</td><td class="num">5</td><td class="num">96</td><td class="num">140</td><td class="num">0</td><td class="num">157</td>
+        <td class="num">8</td><td class="num">9</td><td class="num">9</td><td class="num">11</td><td class="num">0</td><td class="num">11</td>
+        <td class="num">190</td><td class="num">194</td><td class="num">194</td><td class="num">194</td><td class="num">0</td><td class="num">194</td>
+        <td class="num">73787</td><td class="num">75398</td><td class="num">75686</td><td class="num">75988</td><td class="num">0</td><td class="num">76053</td>
+        <td class="num derived">2.11</td><td class="num derived">0.56</td>
+      </tr>
+<tr>
+        <td class="sec">polyblend</td>
+        <td class="num">1</td><td class="num">1</td><td class="num">2</td><td class="num">2</td><td class="num">0</td><td class="num">3</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">9</td><td class="num">10</td><td class="num">0</td><td class="num">17</td>
+        <td class="num">6</td><td class="num">7</td><td class="num">7</td><td class="num">9</td><td class="num">0</td><td class="num">9</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td>
+        <td class="num derived">0.14</td><td class="num derived">0.00</td>
+      </tr>
+<tr>
+        <td class="sec">hud_2d</td>
+        <td class="num">7</td><td class="num">7</td><td class="num">16</td><td class="num">36</td><td class="num">1</td><td class="num">47</td>
+        <td class="num">44</td><td class="num">40</td><td class="num">66</td><td class="num">76</td><td class="num">2</td><td class="num">652</td>
+        <td class="num">6</td><td class="num">7</td><td class="num">7</td><td class="num">9</td><td class="num">2</td><td class="num">9</td>
+        <td class="num">1918</td><td class="num">2700</td><td class="num">2788</td><td class="num">2790</td><td class="num">4</td><td class="num">2790</td>
+        <td class="num">934274</td><td class="num">1124160</td><td class="num">2106368</td><td class="num">2114624</td><td class="num">1920</td><td class="num">2114624</td>
+        <td class="num derived">1.00</td><td class="num derived">5.71</td>
+      </tr>
+<tr>
+        <td class="sec">swap</td>
+        <td class="num">14448</td><td class="num">16022</td><td class="num">16517</td><td class="num">19400</td><td class="num">2207</td><td class="num">21090</td>
+        <td class="num">143</td><td class="num">32</td><td class="num">1027</td><td class="num">1314</td><td class="num">23</td><td class="num">3552</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td>
+        <td class="na" colspan="2">-</td>
+      </tr>
+<tr>
+        <td class="sec">scene</td>
+        <td class="num">3057</td><td class="num">584</td><td class="num">16500</td><td class="num">21189</td><td class="num">0</td><td class="num">24295</td>
+        <td class="num">17638</td><td class="num">16709</td><td class="num">24568</td><td class="num">26256</td><td class="num">0</td><td class="num">33962</td>
+        <td class="num">1483</td><td class="num">812</td><td class="num">4729</td><td class="num">4814</td><td class="num">0</td><td class="num">6270</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num derived">0.72</td><td class="num derived">20.58</td>
+      </tr>
+<tr>
+        <td class="sec">frame_total</td>
+        <td class="num">17574</td><td class="num">16692</td><td class="num">33331</td><td class="num">33389</td><td class="num">5906</td><td class="num">37707</td>
+        <td class="num">18861</td><td class="num">16810</td><td class="num">31229</td><td class="num">34024</td><td class="num">4271</td><td class="num">72444</td>
+        <td class="num">1483</td><td class="num">812</td><td class="num">4729</td><td class="num">4814</td><td class="num">2</td><td class="num">6270</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num derived">20.56</td><td class="num derived">20.70</td>
+      </tr>
+<tr>
+        <td class="sec">cpu_mark_leaves</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td>
+        <td class="num">1483</td><td class="num">812</td><td class="num">4729</td><td class="num">4814</td><td class="num">0</td><td class="num">6270</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="na" colspan="2">-</td>
+      </tr>
+<tr>
+        <td class="sec">cpu_trans_setup</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num">51</td><td class="num">50</td><td class="num">65</td><td class="num">76</td><td class="num">0</td><td class="num">86</td>
+        <td class="num">339</td><td class="num">276</td><td class="num">657</td><td class="num">711</td><td class="num">0</td><td class="num">852</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="na" colspan="2">-</td>
+      </tr>
+<tr>
+        <td class="sec">cpu_water</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num">927</td><td class="num">0</td><td class="num">5966</td><td class="num">6452</td><td class="num">0</td><td class="num">6927</td>
+        <td class="num">231</td><td class="num">245</td><td class="num">245</td><td class="num">263</td><td class="num">0</td><td class="num">287</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="na" colspan="2">-</td>
+      </tr>
+<tr>
+        <td class="sec">cpu_particles</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num">15</td><td class="num">16</td><td class="num">22</td><td class="num">23</td><td class="num">0</td><td class="num">25</td>
+        <td class="num">339</td><td class="num">276</td><td class="num">657</td><td class="num">711</td><td class="num">0</td><td class="num">852</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="na" colspan="2">-</td>
+      </tr>
+<tr>
+        <td class="sec">cpu_alias</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num">165</td><td class="num">36</td><td class="num">904</td><td class="num">1126</td><td class="num">0</td><td class="num">1201</td>
+        <td class="num">339</td><td class="num">276</td><td class="num">657</td><td class="num">711</td><td class="num">0</td><td class="num">852</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="na" colspan="2">-</td>
+      </tr>
+<tr>
+        <td class="sec">cpu_sprite</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num">57</td><td class="num">54</td><td class="num">74</td><td class="num">299</td><td class="num">0</td><td class="num">384</td>
+        <td class="num">229</td><td class="num">262</td><td class="num">262</td><td class="num">262</td><td class="num">0</td><td class="num">262</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="na" colspan="2">-</td>
+      </tr>
+<tr>
+        <td class="sec">cpu_brush_trans</td>
+        <td colspan="6" class="na">-</td>
+        <td class="num">23</td><td class="num">7</td><td class="num">97</td><td class="num">114</td><td class="num">0</td><td class="num">118</td>
+        <td class="num">339</td><td class="num">276</td><td class="num">657</td><td class="num">711</td><td class="num">0</td><td class="num">838</td>
+        <td colspan="6" class="na">-</td>
+        <td colspan="6" class="na">-</td>
+        <td class="na" colspan="2">-</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>Machine-readable</h2>
+  <div class="hint">
+    The block below is intended for ingestion by AI tools: plain-text digest followed by the raw JSON.
+    Select all and paste.
+  </div>
+  <details open>
+    <summary>plain-text digest</summary>
+    <pre class="digest" id="digest-text"># carviary profile digest
+
+build: carviary
+gl_version: 3.3.0 NVIDIA 595.97
+demo: 
+map: Place of Many Deaths
+resolution: 1920x1080
+samples: 62
+
+Each section below reports gpu_us / cpu_us / draw_calls / tris / frags_visible
+as mean p50 p95 p99 min max. Times in microseconds; counters absolute.
+
+## per-section stats
+
+### clear
+  gpu_us         mean=2 p50=2 p95=2 p99=2 min=0 max=6
+  cpu_us         mean=818 p50=1 p95=50 p99=85 min=0 max=50458
+  draw_calls     mean=1483 p50=812 p95=4729 p99=4814 min=0 max=6270
+  tris           mean=0 p50=0 p95=0 p99=0 min=0 max=0
+  frags_visible  mean=0 p50=0 p95=0 p99=0 min=0 max=0
+
+### world_opaque
+  gpu_us         mean=1288 p50=327 p95=7301 p99=11222 min=0 max=12872
+  cpu_us         mean=15851 p50=16048 p95=16989 p99=20175 min=0 max=26384
+  draw_calls     mean=1483 p50=812 p95=4729 p99=4814 min=0 max=6270
+  tris           mean=4270 p50=2500 p95=13242 p99=13271 min=0 max=17122
+  frags_visible  mean=2338342 p50=2436739 p95=2436739 p99=2495813 min=0 max=2514205
+
+### viewmodel
+  gpu_us         mean=47 p50=19 p95=201 p99=253 min=0 max=276
+  cpu_us         mean=12 p50=5 p95=96 p99=140 min=0 max=157
+  draw_calls     mean=8 p50=9 p95=9 p99=11 min=0 max=11
+  tris           mean=190 p50=194 p95=194 p99=194 min=0 max=194
+  frags_visible  mean=73787 p50=75398 p95=75686 p99=75988 min=0 max=76053
+
+### polyblend
+  gpu_us         mean=1 p50=1 p95=2 p99=2 min=0 max=3
+  cpu_us         mean=0 p50=0 p95=9 p99=10 min=0 max=17
+  draw_calls     mean=6 p50=7 p95=7 p99=9 min=0 max=9
+  tris           mean=0 p50=0 p95=0 p99=0 min=0 max=0
+  frags_visible  mean=0 p50=0 p95=0 p99=0 min=0 max=0
+
+### hud_2d
+  gpu_us         mean=7 p50=7 p95=16 p99=36 min=1 max=47
+  cpu_us         mean=44 p50=40 p95=66 p99=76 min=2 max=652
+  draw_calls     mean=6 p50=7 p95=7 p99=9 min=2 max=9
+  tris           mean=1918 p50=2700 p95=2788 p99=2790 min=4 max=2790
+  frags_visible  mean=934274 p50=1124160 p95=2106368 p99=2114624 min=1920 max=2114624
+
+### swap
+  gpu_us         mean=14448 p50=16022 p95=16517 p99=19400 min=2207 max=21090
+  cpu_us         mean=143 p50=32 p95=1027 p99=1314 min=23 max=3552
+  draw_calls     mean=0 p50=0 p95=0 p99=0 min=0 max=0
+  tris           mean=0 p50=0 p95=0 p99=0 min=0 max=0
+  frags_visible  mean=0 p50=0 p95=0 p99=0 min=0 max=0
+
+### scene
+  gpu_us         mean=3057 p50=584 p95=16500 p99=21189 min=0 max=24295
+  cpu_us         mean=17638 p50=16709 p95=24568 p99=26256 min=0 max=33962
+  draw_calls     mean=1483 p50=812 p95=4729 p99=4814 min=0 max=6270
+
+### frame_total
+  gpu_us         mean=17574 p50=16692 p95=33331 p99=33389 min=5906 max=37707
+  cpu_us         mean=18861 p50=16810 p95=31229 p99=34024 min=4271 max=72444
+  draw_calls     mean=1483 p50=812 p95=4729 p99=4814 min=2 max=6270
+
+### cpu_mark_leaves
+  cpu_us         mean=0 p50=0 p95=0 p99=0 min=0 max=0
+  draw_calls     mean=1483 p50=812 p95=4729 p99=4814 min=0 max=6270
+
+### cpu_trans_setup
+  cpu_us         mean=51 p50=50 p95=65 p99=76 min=0 max=86
+  draw_calls     mean=339 p50=276 p95=657 p99=711 min=0 max=852
+
+### cpu_water
+  cpu_us         mean=927 p50=0 p95=5966 p99=6452 min=0 max=6927
+  draw_calls     mean=231 p50=245 p95=245 p99=263 min=0 max=287
+
+### cpu_particles
+  cpu_us         mean=15 p50=16 p95=22 p99=23 min=0 max=25
+  draw_calls     mean=339 p50=276 p95=657 p99=711 min=0 max=852
+
+### cpu_alias
+  cpu_us         mean=165 p50=36 p95=904 p99=1126 min=0 max=1201
+  draw_calls     mean=339 p50=276 p95=657 p99=711 min=0 max=852
+
+### cpu_sprite
+  cpu_us         mean=57 p50=54 p95=74 p99=299 min=0 max=384
+  draw_calls     mean=229 p50=262 p95=262 p99=262 min=0 max=262
+
+### cpu_brush_trans
+  cpu_us         mean=23 p50=7 p95=97 p99=114 min=0 max=118
+  draw_calls     mean=339 p50=276 p95=657 p99=711 min=0 max=838
+
+## plain-language summary
+
+* El motor va sobrado de GPU.
+  La GPU solo trabaja unos 16.5 ms por frame. El monitor dibuja un frame cada 16.7 ms (60 veces por segundo). Sobra muchísimo tiempo. La GPU pasa más del 90% del frame esperando al monitor.
+
+* Los números de frame_total y swap no sirven para comparar.
+  Son fijos: siempre valen lo mismo porque están atados al monitor. Si cambias código y el número no se mueve, no significa que no hayas mejorado. Mira las otras filas (world_opaque, viewmodel, etc.) — esas sí reaccionan a cambios de código.
+
+* Lo que más cuesta en GPU es el mundo (paredes y suelo).
+  world_opaque se lleva alrededor del 92% del trabajo de la GPU entre todas las fases medidas. Si algún día el motor va lento, ese es el primer sitio donde mirar.
+
+* Dentro del 3D, lo que más CPU come es sprites (~0.1 ms).
+  Hemos desglosado el render 3D en partes. La que más tarda en CPU ahora mismo es "cpu_sprite" (sprites): 0.1 ms. Si algún día quieres que el motor vaya más rápido en CPU, es el primer sitio donde hay que mirar.
+
+* Los ~0.5 ms 'sin explicar' no son trabajo, son espera.
+  La fase "scene" marca ~16.7 ms de CPU, pero las subfases que medimos dentro suman mucho menos. La diferencia es tiempo *esperando*, no trabajando: el hilo se bloquea (en audio, en sincronización con la GPU, en vsync). Son milisegundos fantasma. La suma de las subfases (world_opaque + cpu_water + cpu_particles + ...) es el coste real de CPU del render 3D.
+
+* Para comparar builds usa la columna us/draw (verde, al final de la tabla grande).
+  Más abajo en esta página hay una tabla enorme con todas las fases y sus números. Las dos últimas columnas están resaltadas en verde: "us/draw gpu" y "us/draw cpu". Es microsegundos por draw call — el coste de dibujar una cosa cualquiera. Cuando cambies código y quieras saber si mejoraste, compara esa columna entre builds. Si baja, optimizaste de verdad. Si solo baja el tiempo total pero esa columna sube, no optimizaste: simplemente había menos cosas en pantalla.
+
+## automated analysis
+
+[warn] scene.cpu_us.p50 (16709us) is pinned to ~vsync — the number is the stall, not the work
+  Measured CPU time for scene sits inside a vsync period (~16-17ms). The instrumented children sum to only 16211us (world_opaque=16048, cpu_mark_leaves=0, cpu_trans_setup=50, cpu_water=0, cpu_particles=16, cpu_alias=36, cpu_sprite=54, cpu_brush_trans=7). The "missing" 498us is almost certainly wall-clock time spent waiting somewhere -- either S_ExtraUpdate(), a driver sync, or the GL pipeline flushing. Trust the per-child numbers, not scene.cpu_us itself. The real CPU cost of the 3D render is closer to 16211us than to 16709us.
+
+[warn] world_opaque.gpu_us p95/p50 = 22.3x (spiky)
+  p50=327, p95=7301. A few sampled frames cost several times more than the median. Common causes: texture upload, shader compile, GC/ hunk alloc, variable geometry (alias model swaps). Investigate max-frame samples.
+
+[warn] viewmodel.gpu_us p95/p50 = 10.6x (spiky)
+  p50=19, p95=201. A few sampled frames cost several times more than the median. Common causes: texture upload, shader compile, GC/ hunk alloc, variable geometry (alias model swaps). Investigate max-frame samples.
+
+[warn] swap.cpu_us p95/p50 = 32.1x (spiky)
+  p50=32, p95=1027. A few sampled frames cost several times more than the median. Common causes: texture upload, shader compile, GC/ hunk alloc, variable geometry (alias model swaps). Investigate max-frame samples.
+
+[warn] cpu_alias.cpu_us p95/p50 = 25.1x (spiky)
+  p50=36, p95=904. A few sampled frames cost several times more than the median. Common causes: texture upload, shader compile, GC/ hunk alloc, variable geometry (alias model swaps). Investigate max-frame samples.
+
+[info] GPU frame time is 82% swap / vsync wait (expected)
+  frame_total gpu_us.mean=17574 vs swap gpu_us.mean=14448. Vsync is hard-enabled in this build (SDL_GL_SetSwapInterval(1) in gl_vid_sdl.cpp) and there is no flag to disable it. This is not a bug to fix, it is a measurement constraint: frame_total and swap numbers mean nothing for build-vs-build comparison here. Compare per-section gpu_us (clear / world_opaque / viewmodel / polyblend / hud_2d / scene) instead. Those are unaffected by vsync.
+
+[info] GPU headroom: scene p95 uses only 98.8% of the frame budget
+  scene.gpu_us.p95=16500us, frame_total.gpu_us.p50=16692us. The actual render work fits 1x over in the frame budget -- plenty of GPU headroom. The large frame_total is vsync padding, not engine work.
+
+[info] Top GPU section (p50): world_opaque (327us, 92% of non-swap GPU)
+  Ranking by gpu_us.p50 (excluding frame_total/scene/swap): world_opaque=327us, viewmodel=19us, hud_2d=7us, clear=2us, polyblend=1us
+
+[info] Top CPU section (p50): world_opaque (16048us)
+  Ranking by cpu_us.p50 (excluding frame_total/scene): world_opaque=16048us, cpu_sprite=54us, cpu_trans_setup=50us, hud_2d=40us, cpu_alias=36us
+
+[info] clear: CPU-bound (cpu 818us vs gpu 2us, 409.0x)
+  Cost lives on the CPU side — command buffer prep, state changes, BSP walks, alias model blending. GPU work itself is small. Optimization target: reduce CPU work per draw or batch more.
+
+[info] world_opaque: CPU-bound (cpu 15851us vs gpu 1288us, 12.3x)
+  Cost lives on the CPU side — command buffer prep, state changes, BSP walks, alias model blending. GPU work itself is small. Optimization target: reduce CPU work per draw or batch more.
+
+[info] viewmodel: GPU-bound (gpu 47us vs cpu 12us, 3.9x)
+  The GPU is the bottleneck here — likely fill rate (lots of overdraw/ large surfaces) or shader cost. Optimization target: reduce fragments (culling, smaller triangles, early-Z) or shader ops.
+
+[info] hud_2d: CPU-bound (cpu 44us vs gpu 7us, 6.3x)
+  Cost lives on the CPU side — command buffer prep, state changes, BSP walks, alias model blending. GPU work itself is small. Optimization target: reduce CPU work per draw or batch more.
+
+[info] swap: GPU-bound (gpu 14448us vs cpu 143us, 101.0x)
+  The GPU is the bottleneck here — likely fill rate (lots of overdraw/ large surfaces) or shader cost. Optimization target: reduce fragments (culling, smaller triangles, early-Z) or shader ops.
+
+## manual review
+
+### The frame budget is not the real metric
+frame_total gpu_us.p50 is 16692us — that is just 1/60s (vsync). Of that, swap alone takes 16022us (96%). The actual render work (scene) fits in 16500us at p95, about 1x under budget. Vsync is hard-wired on in this build (SDL_GL_SetSwapInterval(1) in gl_vid_sdl.cpp has no off switch), so frame_total and swap will always look this way. That is fine — just ignore them. Compare per-section gpu_us instead; those are unaffected by vsync and show real engine work.
+
+### scene has a blind spot we should eliminate
+scene.cpu_us.p50 = 16709us, world_opaque.cpu_us.p50 = 16048us. That leaves ~661us inside scene that we cannot attribute to any section. It is spread across R_DrawParticles, R_DrawWaterSurfaces, R_DrawAliasModel, R_DrawSpriteModel, R_DrawBrushMTexTrans, R_MarkLeaves, R_MoveParticles, R_SetupTransEntities — none of them instrumented. Until we split these, "optimize scene" is a dartboard. Next profiler iteration should add CPU-only sections (just Sys_FloatTime) for each of those — GL query nesting isn't an issue if we only measure CPU.
+
+### world_opaque 'spike' is not a stall, it is more work
+world_opaque.gpu_us jumps from p50=327 to p95=7301us, which the automated heuristics flag as spiky. But draw_calls also jump from p50=812 to p95=4729. Cost per draw is 0.40us at p50 and 1.54us at p95 — essentially identical. That means the "spike" is just the PVS exposing more surfaces when the player looks into a bigger room. There is no per-draw regression to fix. Optimization target: reduce number of draws (batch surfaces, merge fans), not cost per draw.
+
+### polyblend CPU numbers are measurement noise
+polyblend.cpu_us.p99 = 10us, but R_PolyBlend issues at most three fullscreen quad draws — real CPU cost is under 10us. The large p99 is almost certainly vsync stall or a context switch captured by Sys_FloatTime() inside the section, not real work. Don't chase it. It also exposes a limitation of the current CPU timing: it is wall-clock, so anything that happens to block the thread during a section contaminates the sample. If this becomes a problem, replace Sys_FloatTime with QueryThreadCycleTime or a thread-time API.
+
+### us/draw is the metric to watch between builds
+Absolute section times move with content (PVS, entity count), so p50 alone can regress without any code change. us/draw (p50 gpu_us divided by p50 draw_calls, shown in the green column of the table) normalizes out content load: if a code change makes per-draw cost go from 0.56us to 0.71us while draw count stays the same, you just regressed. This is a better comparison knob for build-vs-build diffs than gpu_us.p50 in isolation.
+</pre>
+  </details>
+  <details>
+    <summary>raw profile.json</summary>
+    <pre class="digest" id="raw-json">{
+  "build": "carviary",
+  "gl_version": "3.3.0 NVIDIA 595.97",
+  "demo": "",
+  "map": "Place of Many Deaths",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "samples": 62,
+  "sections": {
+    "clear": {
+      "gpu_us": {
+        "mean": 2,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 0,
+        "max": 6
+      },
+      "cpu_us": {
+        "mean": 818,
+        "p50": 1,
+        "p95": 50,
+        "p99": 85,
+        "min": 0,
+        "max": 50458
+      },
+      "draw_calls": {
+        "mean": 1483,
+        "p50": 812,
+        "p95": 4729,
+        "p99": 4814,
+        "min": 0,
+        "max": 6270
+      },
+      "tris": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0
+      },
+      "frags_visible": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "world_opaque": {
+      "gpu_us": {
+        "mean": 1288,
+        "p50": 327,
+        "p95": 7301,
+        "p99": 11222,
+        "min": 0,
+        "max": 12872
+      },
+      "cpu_us": {
+        "mean": 15851,
+        "p50": 16048,
+        "p95": 16989,
+        "p99": 20175,
+        "min": 0,
+        "max": 26384
+      },
+      "draw_calls": {
+        "mean": 1483,
+        "p50": 812,
+        "p95": 4729,
+        "p99": 4814,
+        "min": 0,
+        "max": 6270
+      },
+      "tris": {
+        "mean": 4270,
+        "p50": 2500,
+        "p95": 13242,
+        "p99": 13271,
+        "min": 0,
+        "max": 17122
+      },
+      "frags_visible": {
+        "mean": 2338342,
+        "p50": 2436739,
+        "p95": 2436739,
+        "p99": 2495813,
+        "min": 0,
+        "max": 2514205
+      }
+    },
+    "viewmodel": {
+      "gpu_us": {
+        "mean": 47,
+        "p50": 19,
+        "p95": 201,
+        "p99": 253,
+        "min": 0,
+        "max": 276
+      },
+      "cpu_us": {
+        "mean": 12,
+        "p50": 5,
+        "p95": 96,
+        "p99": 140,
+        "min": 0,
+        "max": 157
+      },
+      "draw_calls": {
+        "mean": 8,
+        "p50": 9,
+        "p95": 9,
+        "p99": 11,
+        "min": 0,
+        "max": 11
+      },
+      "tris": {
+        "mean": 190,
+        "p50": 194,
+        "p95": 194,
+        "p99": 194,
+        "min": 0,
+        "max": 194
+      },
+      "frags_visible": {
+        "mean": 73787,
+        "p50": 75398,
+        "p95": 75686,
+        "p99": 75988,
+        "min": 0,
+        "max": 76053
+      }
+    },
+    "polyblend": {
+      "gpu_us": {
+        "mean": 1,
+        "p50": 1,
+        "p95": 2,
+        "p99": 2,
+        "min": 0,
+        "max": 3
+      },
+      "cpu_us": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 9,
+        "p99": 10,
+        "min": 0,
+        "max": 17
+      },
+      "draw_calls": {
+        "mean": 6,
+        "p50": 7,
+        "p95": 7,
+        "p99": 9,
+        "min": 0,
+        "max": 9
+      },
+      "tris": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0
+      },
+      "frags_visible": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "hud_2d": {
+      "gpu_us": {
+        "mean": 7,
+        "p50": 7,
+        "p95": 16,
+        "p99": 36,
+        "min": 1,
+        "max": 47
+      },
+      "cpu_us": {
+        "mean": 44,
+        "p50": 40,
+        "p95": 66,
+        "p99": 76,
+        "min": 2,
+        "max": 652
+      },
+      "draw_calls": {
+        "mean": 6,
+        "p50": 7,
+        "p95": 7,
+        "p99": 9,
+        "min": 2,
+        "max": 9
+      },
+      "tris": {
+        "mean": 1918,
+        "p50": 2700,
+        "p95": 2788,
+        "p99": 2790,
+        "min": 4,
+        "max": 2790
+      },
+      "frags_visible": {
+        "mean": 934274,
+        "p50": 1124160,
+        "p95": 2106368,
+        "p99": 2114624,
+        "min": 1920,
+        "max": 2114624
+      }
+    },
+    "swap": {
+      "gpu_us": {
+        "mean": 14448,
+        "p50": 16022,
+        "p95": 16517,
+        "p99": 19400,
+        "min": 2207,
+        "max": 21090
+      },
+      "cpu_us": {
+        "mean": 143,
+        "p50": 32,
+        "p95": 1027,
+        "p99": 1314,
+        "min": 23,
+        "max": 3552
+      },
+      "draw_calls": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0
+      },
+      "tris": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0
+      },
+      "frags_visible": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "scene": {
+      "gpu_us": {
+        "mean": 3057,
+        "p50": 584,
+        "p95": 16500,
+        "p99": 21189,
+        "min": 0,
+        "max": 24295
+      },
+      "cpu_us": {
+        "mean": 17638,
+        "p50": 16709,
+        "p95": 24568,
+        "p99": 26256,
+        "min": 0,
+        "max": 33962
+      },
+      "draw_calls": {
+        "mean": 1483,
+        "p50": 812,
+        "p95": 4729,
+        "p99": 4814,
+        "min": 0,
+        "max": 6270
+      }
+    },
+    "frame_total": {
+      "gpu_us": {
+        "mean": 17574,
+        "p50": 16692,
+        "p95": 33331,
+        "p99": 33389,
+        "min": 5906,
+        "max": 37707
+      },
+      "cpu_us": {
+        "mean": 18861,
+        "p50": 16810,
+        "p95": 31229,
+        "p99": 34024,
+        "min": 4271,
+        "max": 72444
+      },
+      "draw_calls": {
+        "mean": 1483,
+        "p50": 812,
+        "p95": 4729,
+        "p99": 4814,
+        "min": 2,
+        "max": 6270
+      }
+    },
+    "cpu_mark_leaves": {
+      "cpu_us": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0
+      },
+      "draw_calls": {
+        "mean": 1483,
+        "p50": 812,
+        "p95": 4729,
+        "p99": 4814,
+        "min": 0,
+        "max": 6270
+      }
+    },
+    "cpu_trans_setup": {
+      "cpu_us": {
+        "mean": 51,
+        "p50": 50,
+        "p95": 65,
+        "p99": 76,
+        "min": 0,
+        "max": 86
+      },
+      "draw_calls": {
+        "mean": 339,
+        "p50": 276,
+        "p95": 657,
+        "p99": 711,
+        "min": 0,
+        "max": 852
+      }
+    },
+    "cpu_water": {
+      "cpu_us": {
+        "mean": 927,
+        "p50": 0,
+        "p95": 5966,
+        "p99": 6452,
+        "min": 0,
+        "max": 6927
+      },
+      "draw_calls": {
+        "mean": 231,
+        "p50": 245,
+        "p95": 245,
+        "p99": 263,
+        "min": 0,
+        "max": 287
+      }
+    },
+    "cpu_particles": {
+      "cpu_us": {
+        "mean": 15,
+        "p50": 16,
+        "p95": 22,
+        "p99": 23,
+        "min": 0,
+        "max": 25
+      },
+      "draw_calls": {
+        "mean": 339,
+        "p50": 276,
+        "p95": 657,
+        "p99": 711,
+        "min": 0,
+        "max": 852
+      }
+    },
+    "cpu_alias": {
+      "cpu_us": {
+        "mean": 165,
+        "p50": 36,
+        "p95": 904,
+        "p99": 1126,
+        "min": 0,
+        "max": 1201
+      },
+      "draw_calls": {
+        "mean": 339,
+        "p50": 276,
+        "p95": 657,
+        "p99": 711,
+        "min": 0,
+        "max": 852
+      }
+    },
+    "cpu_sprite": {
+      "cpu_us": {
+        "mean": 57,
+        "p50": 54,
+        "p95": 74,
+        "p99": 299,
+        "min": 0,
+        "max": 384
+      },
+      "draw_calls": {
+        "mean": 229,
+        "p50": 262,
+        "p95": 262,
+        "p99": 262,
+        "min": 0,
+        "max": 262
+      }
+    },
+    "cpu_brush_trans": {
+      "cpu_us": {
+        "mean": 23,
+        "p50": 7,
+        "p95": 97,
+        "p99": 114,
+        "min": 0,
+        "max": 118
+      },
+      "draw_calls": {
+        "mean": 339,
+        "p50": 276,
+        "p95": 657,
+        "p99": 711,
+        "min": 0,
+        "max": 838
+      }
+    }
+  }
+}</pre>
+  </details>
+
+  <script type="application/json" id="profile-data">
+{"build":"carviary","gl_version":"3.3.0 NVIDIA 595.97","demo":"","map":"Place of Many Deaths","resolution":[1920,1080],"samples":62,"sections":{"clear":{"gpu_us":{"mean":2,"p50":2,"p95":2,"p99":2,"min":0,"max":6},"cpu_us":{"mean":818,"p50":1,"p95":50,"p99":85,"min":0,"max":50458},"draw_calls":{"mean":1483,"p50":812,"p95":4729,"p99":4814,"min":0,"max":6270},"tris":{"mean":0,"p50":0,"p95":0,"p99":0,"min":0,"max":0},"frags_visible":{"mean":0,"p50":0,"p95":0,"p99":0,"min":0,"max":0}},"world_opaque":{"gpu_us":{"mean":1288,"p50":327,"p95":7301,"p99":11222,"min":0,"max":12872},"cpu_us":{"mean":15851,"p50":16048,"p95":16989,"p99":20175,"min":0,"max":26384},"draw_calls":{"mean":1483,"p50":812,"p95":4729,"p99":4814,"min":0,"max":6270},"tris":{"mean":4270,"p50":2500,"p95":13242,"p99":13271,"min":0,"max":17122},"frags_visible":{"mean":2338342,"p50":2436739,"p95":2436739,"p99":2495813,"min":0,"max":2514205}},"viewmodel":{"gpu_us":{"mean":47,"p50":19,"p95":201,"p99":253,"min":0,"max":276},"cpu_us":{"mean":12,"p50":5,"p95":96,"p99":140,"min":0,"max":157},"draw_calls":{"mean":8,"p50":9,"p95":9,"p99":11,"min":0,"max":11},"tris":{"mean":190,"p50":194,"p95":194,"p99":194,"min":0,"max":194},"frags_visible":{"mean":73787,"p50":75398,"p95":75686,"p99":75988,"min":0,"max":76053}},"polyblend":{"gpu_us":{"mean":1,"p50":1,"p95":2,"p99":2,"min":0,"max":3},"cpu_us":{"mean":0,"p50":0,"p95":9,"p99":10,"min":0,"max":17},"draw_calls":{"mean":6,"p50":7,"p95":7,"p99":9,"min":0,"max":9},"tris":{"mean":0,"p50":0,"p95":0,"p99":0,"min":0,"max":0},"frags_visible":{"mean":0,"p50":0,"p95":0,"p99":0,"min":0,"max":0}},"hud_2d":{"gpu_us":{"mean":7,"p50":7,"p95":16,"p99":36,"min":1,"max":47},"cpu_us":{"mean":44,"p50":40,"p95":66,"p99":76,"min":2,"max":652},"draw_calls":{"mean":6,"p50":7,"p95":7,"p99":9,"min":2,"max":9},"tris":{"mean":1918,"p50":2700,"p95":2788,"p99":2790,"min":4,"max":2790},"frags_visible":{"mean":934274,"p50":1124160,"p95":2106368,"p99":2114624,"min":1920,"max":2114624}},"swap":{"gpu_us":{"mean":14448,"p50":16022,"p95":16517,"p99":19400,"min":2207,"max":21090},"cpu_us":{"mean":143,"p50":32,"p95":1027,"p99":1314,"min":23,"max":3552},"draw_calls":{"mean":0,"p50":0,"p95":0,"p99":0,"min":0,"max":0},"tris":{"mean":0,"p50":0,"p95":0,"p99":0,"min":0,"max":0},"frags_visible":{"mean":0,"p50":0,"p95":0,"p99":0,"min":0,"max":0}},"scene":{"gpu_us":{"mean":3057,"p50":584,"p95":16500,"p99":21189,"min":0,"max":24295},"cpu_us":{"mean":17638,"p50":16709,"p95":24568,"p99":26256,"min":0,"max":33962},"draw_calls":{"mean":1483,"p50":812,"p95":4729,"p99":4814,"min":0,"max":6270}},"frame_total":{"gpu_us":{"mean":17574,"p50":16692,"p95":33331,"p99":33389,"min":5906,"max":37707},"cpu_us":{"mean":18861,"p50":16810,"p95":31229,"p99":34024,"min":4271,"max":72444},"draw_calls":{"mean":1483,"p50":812,"p95":4729,"p99":4814,"min":2,"max":6270}},"cpu_mark_leaves":{"cpu_us":{"mean":0,"p50":0,"p95":0,"p99":0,"min":0,"max":0},"draw_calls":{"mean":1483,"p50":812,"p95":4729,"p99":4814,"min":0,"max":6270}},"cpu_trans_setup":{"cpu_us":{"mean":51,"p50":50,"p95":65,"p99":76,"min":0,"max":86},"draw_calls":{"mean":339,"p50":276,"p95":657,"p99":711,"min":0,"max":852}},"cpu_water":{"cpu_us":{"mean":927,"p50":0,"p95":5966,"p99":6452,"min":0,"max":6927},"draw_calls":{"mean":231,"p50":245,"p95":245,"p99":263,"min":0,"max":287}},"cpu_particles":{"cpu_us":{"mean":15,"p50":16,"p95":22,"p99":23,"min":0,"max":25},"draw_calls":{"mean":339,"p50":276,"p95":657,"p99":711,"min":0,"max":852}},"cpu_alias":{"cpu_us":{"mean":165,"p50":36,"p95":904,"p99":1126,"min":0,"max":1201},"draw_calls":{"mean":339,"p50":276,"p95":657,"p99":711,"min":0,"max":852}},"cpu_sprite":{"cpu_us":{"mean":57,"p50":54,"p95":74,"p99":299,"min":0,"max":384},"draw_calls":{"mean":229,"p50":262,"p95":262,"p99":262,"min":0,"max":262}},"cpu_brush_trans":{"cpu_us":{"mean":23,"p50":7,"p95":97,"p99":114,"min":0,"max":118},"draw_calls":{"mean":339,"p50":276,"p95":657,"p99":711,"min":0,"max":838}}}}
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    const GPU_LABELS = ["clear","world_opaque","viewmodel","polyblend","hud_2d"];
+    const GPU_P50    = [2,327,19,1,7];
+    const GPU_P95    = [2,7301,201,2,16];
+    const CPU_LABELS = ["clear","world_opaque","viewmodel","polyblend","hud_2d","cpu_mark_leaves","cpu_trans_setup","cpu_water","cpu_particles","cpu_alias","cpu_sprite","cpu_brush_trans"];
+    const CPU_P50    = [1,16048,5,0,40,0,50,0,16,36,54,7];
+    const CPU_P95    = [50,16989,96,9,66,0,65,5966,22,904,74,97];
+
+    function makeChart(id, title, labels, p50, p95) {
+      const ctx = document.getElementById(id);
+      return new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            { label: "p50", data: p50, backgroundColor: "#58a6ff" },
+            { label: "p95", data: p95, backgroundColor: "#d29922" },
+          ],
+        },
+        options: {
+          indexAxis: "y",
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: { display: true, text: title, color: "#e6edf3" },
+            legend: { labels: { color: "#c9d1d9" } },
+            tooltip: { callbacks: { label: (c) => c.dataset.label + ": " + c.parsed.x + " us" } },
+          },
+          scales: {
+            x: { ticks: { color: "#8b949e" }, grid: { color: "#21262d" }, title: { display: true, text: "microseconds", color: "#8b949e" } },
+            y: { ticks: { color: "#c9d1d9" }, grid: { color: "#21262d" } },
+          },
+        },
+      });
+    }
+
+    makeChart("gpu-chart", "GPU time per section (swap/frame_total excluded)", GPU_LABELS, GPU_P50, GPU_P95);
+    makeChart("cpu-chart", "CPU time per section (swap/frame_total excluded)", CPU_LABELS, CPU_P50, CPU_P95);
+  </script>
+</body>
+</html>

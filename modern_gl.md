@@ -211,16 +211,48 @@ Misma estructura matematica que el legacy (amplitud 8, escala 1/64, fase cruzada
 
 ---
 
-## Fase 9 — Switch a Core profile
+## Fase 9 — Switch a Core profile (partida en sub-fases)
 
-**Objetivo:** red de seguridad final.
+### Fase 9a — Matrix stack CPU ✅
 
-- Regenerar GLAD como **Core** y sustituir el zip en [src_sdl3/third_party/glad/](src_sdl3/third_party/glad/)
-- Cambiar `SDL_GL_CONTEXT_PROFILE_COMPATIBILITY` → `SDL_GL_CONTEXT_PROFILE_CORE` en [gl_vid_sdl.cpp](src_sdl3/gl_vid_sdl.cpp)
-- Recompilar: el linker/compilador grita si queda alguna llamada 1.x
-- Arreglar lo que salga
+Estado: **completada y validada visualmente**.
 
-**Criterio de fin:** compila y arranca con contexto Core.
+- [x] [gl_mat4.h](src_sdl3/headers/gl_mat4.h) / [gl_mat4.cpp](src_sdl3/gl_mat4.cpp): `MatStack` con `Push/Pop/Load/LoadIdentity/MulTranslate/MulScale/MulRotate`, helpers `mat4_rotate_axis` y `mat4_frustum`
+- [x] Stacks globales `r_modelview`, `r_projection` inicializados en `GL_Init`
+- [x] `R_CurrentMVP` ahora lee del stack CPU, no de `glGetFloatv`
+- [x] Todas las llamadas `glPushMatrix/glPopMatrix/glRotatef/glTranslatef/glScalef/glFrustum/glOrtho/glMatrixMode/glLoadMatrixf/glLoadIdentity` del render principal sustituidas: `GL_Set2D`, `R_SetupGL`, `MYgluPerspective`, `R_BlendedRotateForEntity`, `R_RotateForEntity`, `R_DrawAliasModel`, `R_SetupBrushPolys`, `R_DrawWaterSurfaces`
+- [x] DOF (post-process opcional, cvar `r_dof=0` por defecto) sigue en GL 1.x — se tratara si se activa
+
+**Criterio de fin cumplido:** todo se ve igual que antes del port de matrices.
+
+### Fase 9b — Fog eliminado ✅
+
+Estado: **completada**.
+
+- [x] Eliminados cvars `gl_fogenable`, `gl_fogstart`, `gl_fogend`, `gl_fogred`, `gl_foggreen`, `gl_fogblue`
+- [x] Eliminadas todas las llamadas `glFog*` y `glEnable/glDisable(GL_FOG)` del motor (en `R_RenderScene` y `gl_flares`)
+- [x] Eliminadas 6 entradas consecutivas del menu Video (fog toggle + start + end + 3 sliders de color), con renumeracion
+- [x] Crosshair queda como entrada final (case 9, y=104)
+
+La feature fog era `off` por defecto y daba un aspecto feo (per-vertex). Si se reintroduce en el futuro, sera en shaders.
+
+### Fase 9c — Switch final a Core profile ✅
+
+Estado: **completada y validada visualmente**. El motor corre en **OpenGL 3.3 Core**.
+
+Cambios:
+- [x] Limpiado `GL_Init` de estado 1.x: fuera `glEnable(GL_TEXTURE_2D)`, `glAlphaFunc`, `glShadeModel`, `glPolygonMode`, `glTexEnvf`, `glTexGeni`
+- [x] Eliminado DOF ([gl_dof.cpp](src_sdl3/gl_dof.cpp) + cvars + llamadas): el path usaba `glRasterPos`/`glDrawPixels`, imposible en Core
+- [x] Sustituido `glColor3f`/`glTexEnvf` del texto legacy por `Draw_SetCharColor` (console/menu/checkbox)
+- [x] Borrados `glColor4f(1,1,1,1)` residuales en crosshair/flares/mdl/part/sprite
+- [x] GLAD regenerado como **Core**
+- [x] `SDL_GL_CONTEXT_PROFILE_CORE` activado
+- [x] **Internal format** de texturas arreglado: `gl_solid_format=3` → `GL_RGB8`, `gl_alpha_format=4` → `GL_RGBA8`, lightmap con `GL_RGBA8` explicito (Core rechaza los numericos legacy)
+- [x] **IDs de textura** migrados a `glGenTextures`: `playertextures[16]`, `lightmap_textures[MAX_LIGHTMAPS]`, `translate_texture`, `solidskytexture`, `alphaskytexture`, todas las texturas de `GL_LoadTexture` (Core no acepta IDs inventados por `texture_extension_number++`)
+- [x] Eliminado todo el sistema legacy de multitextura (`gl_mtexable`, `qglMTexCoord2fSGIS_ARB`, `qglSelectTextureSGIS_ARB`, `TEXTURE0/1_SGIS_ARB`)
+- [x] Eliminado `texture_extension_number` global
+
+**Criterio de fin cumplido:** arranca con `GL_VERSION: 3.3.0 Core`, mundo/modelos/HUD/agua/cielo/partículas/flares/fence/fullbrights todos visuales correctos.
 
 ---
 

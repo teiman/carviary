@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
+#include "gl_profiler.h"
 
 void R_InitParticles (void);
 void R_ClearParticles ();
@@ -97,12 +98,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_keeptjunctions);
 	Cvar_RegisterVariable (&gl_doubleeyes);
 	Cvar_RegisterVariable (&slowmo);		// Tomaz - Slowmo
-	Cvar_RegisterVariable (&gl_fogenable); 
-	Cvar_RegisterVariable (&gl_fogstart); 
-	Cvar_RegisterVariable (&gl_fogend); 
-	Cvar_RegisterVariable (&gl_fogred); 
-	Cvar_RegisterVariable (&gl_fogblue); 
-	Cvar_RegisterVariable (&gl_foggreen);
 	Cvar_RegisterVariable (&centerfade);	// Tomaz - Fading CenterPrints
 	Cvar_RegisterVariable (&sbar_alpha);	// Tomaz - Sbar Alpha
 	Cvar_RegisterVariable (&con_alpha);		// Tomaz - Console Alpha
@@ -118,12 +113,12 @@ void R_Init (void)
 	Cvar_RegisterVariable (&print_center_to_console);	// Tomaz - Prints CenterString's to the console
 	Cvar_RegisterVariable (&gl_particle_fire);	// Tomaz - Fire Particles
 
-	DOF_Init ();		// Depth of Field
 
 	R_InitParticles (); // initiate particle engine
 
-	playertextures = texture_extension_number;
-	texture_extension_number += 16;
+	glGenTextures(16, playertextures);
+
+	Prof_Init ();
 }
 
 /*
@@ -194,7 +189,7 @@ void R_TranslatePlayerSkin (int playernum)
 
 	// because this happens during gameplay, do it fast
 	// instead of sending it through gl_upload 8
-	glBindTexture (GL_TEXTURE_2D, playertextures + playernum);
+	glBindTexture (GL_TEXTURE_2D, playertextures[playernum]);
 
 	scaled_width = gl_max_size.value < 512 ? gl_max_size.value : 512;
 	scaled_height = gl_max_size.value < 256 ? gl_max_size.value : 256;

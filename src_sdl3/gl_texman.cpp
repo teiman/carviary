@@ -495,8 +495,10 @@ GL_LoadTexture_setup:
 	numgltextures++;
 
 	strcpy (glt->identifier, identifier);
-	glt->texnum = texture_extension_number;
-	texture_extension_number++;
+	// Core profile requires IDs minted by glGenTextures.
+	GLuint newtex = 0;
+	glGenTextures(1, &newtex);
+	glt->texnum = (int)newtex;
 
 	glt->crc			= crc;
 	glt->width			= width;

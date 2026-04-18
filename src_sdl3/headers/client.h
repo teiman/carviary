@@ -349,6 +349,8 @@ void CL_PlayDemo_f (void);
 void CL_TimeDemo_f (void);
 void CL_Profile_f (void);
 void CL_PlayProfile_f (void);
+void CL_ProfileLiveStart_f (void);
+void CL_ProfileLiveStop_f (void);
 
 //
 // cl_parse.c

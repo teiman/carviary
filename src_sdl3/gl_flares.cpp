@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_profiler.h"
 
 typedef struct {
 	float x, y, z;
@@ -158,21 +159,17 @@ void R_DrawGlows (entity_t *e)
 
 	glDepthMask (GL_FALSE);
 	glBlendFunc (GL_ONE, GL_ONE);
-	glDisable (GL_TEXTURE_2D);
-	if (gl_fogenable.value) glDisable(GL_FOG);
 
 	GLShader_Use(&R_ParticleShader);
 	glUniformMatrix4fv(R_ParticleShader_u_mvp, 1, GL_FALSE, mvp);
 
 	DynamicVBO_Upload(&flares_vbo, verts, (GLsizei)(n * sizeof(flare_vertex_t)));
 	DynamicVBO_Bind(&flares_vbo);
+	Prof_CountDraw(n);
 	glDrawArrays(GL_TRIANGLES, 0, n);
 
 	glBindVertexArray(0);
 	glUseProgram(0);
-	glEnable (GL_TEXTURE_2D);
 	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDepthMask (GL_TRUE);
-	if (gl_fogenable.value) glEnable(GL_FOG);
-	glColor3f (1,1,1);
 }

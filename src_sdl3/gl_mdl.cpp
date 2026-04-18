@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_profiler.h"
 
 // Streaming VBO + staging buffer shared by all alias draws.
 typedef struct {
@@ -1045,9 +1046,9 @@ flush:
 
 	DynamicVBO_Upload(&alias_vbo, alias_soup, (GLsizei)(nverts * sizeof(alias_vtx_t)));
 	DynamicVBO_Bind(&alias_vbo);
+	Prof_CountDraw(nverts);
 	glDrawArrays(GL_TRIANGLES, 0, nverts);
 
 	glBindVertexArray(0);
 	glUseProgram(0);
-	glColor4f (1,1,1,1);
 }

@@ -19,17 +19,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "gl_profiler.h"
 #include <time.h>
 #include <sys/stat.h>
 #include <direct.h>
 #include <float.h>
-
-// profile stats accumulated per frame
-static double	profile_frame_min = 999.0;
-static double	profile_frame_max = 0.0;
-static double	profile_frame_last = 0.0;
-static int		profile_total_wpoly = 0;
-static int		profile_total_epoly = 0;
 
 extern int c_brush_polys, c_alias_polys;
 extern int glwidth, glheight;
@@ -121,23 +115,14 @@ int CL_GetMessage (void)
 					return 0;		// allready read this frame's message
 				cls.td_lastframe = host_framecount;
 
-				if (cls.playprofile)
+				// pp_framecount is the deterministic network-frame clock
+				// the profiler uses to pick which frames to sample.
+				if (cls.playprofile || cls.profile)
 					cls.pp_framecount++;
 			// if this is the second frame, grab the real td_starttime
 			// so the bogus time on the first frame doesn't count
 				if (host_framecount == cls.td_startframe + 1)
 					cls.td_starttime = realtime;
-
-				// accumulate per-frame stats for profile
-				if (cls.profile && profile_frame_last > 0)
-				{
-					double ft = realtime - profile_frame_last;
-					if (ft < profile_frame_min) profile_frame_min = ft;
-					if (ft > profile_frame_max) profile_frame_max = ft;
-					profile_total_wpoly += c_brush_polys;
-					profile_total_epoly += c_alias_polys;
-				}
-				profile_frame_last = realtime;
 			}
 			else if ( /* cl.time > 0 && */ cl.time <= cl.mtime[0])
 			{
@@ -350,52 +335,8 @@ void CL_PlayDemo_f (void)
 /*
 ====================
 CL_FinishTimeDemo
-
 ====================
 */
-static void CL_WriteProfileJSON (int frames, float time, float fps)
-{
-	char	path[MAX_OSPATH];
-	FILE	*f;
-	float	frame_min_ms, frame_max_ms, frame_avg_ms;
-	int		avg_wpoly, avg_epoly;
-
-	_snprintf (path, sizeof(path), "%s\\carviary\\profile.json", host_parms.basedir);
-	f = fopen (path, "w");
-	if (!f)
-	{
-		Con_Printf ("profile: ERROR could not write %s\n", path);
-		return;
-	}
-
-	frame_avg_ms = (frames > 0) ? (time / frames) * 1000.0f : 0;
-	frame_min_ms = (float)(profile_frame_min * 1000.0);
-	frame_max_ms = (float)(profile_frame_max * 1000.0);
-	avg_wpoly = (frames > 0) ? profile_total_wpoly / frames : 0;
-	avg_epoly = (frames > 0) ? profile_total_epoly / frames : 0;
-
-	fprintf (f,
-		"{\n"
-		"  \"success\": true,\n"
-		"  \"frames\": %d,\n"
-		"  \"seconds\": %.3f,\n"
-		"  \"fps\": %.3f,\n"
-		"  \"frame_ms_avg\": %.2f,\n"
-		"  \"frame_ms_min\": %.2f,\n"
-		"  \"frame_ms_max\": %.2f,\n"
-		"  \"avg_wpoly\": %d,\n"
-		"  \"avg_epoly\": %d,\n"
-		"  \"resolution\": \"%dx%d\"\n"
-		"}\n",
-		frames, time, fps,
-		frame_avg_ms, frame_min_ms, frame_max_ms,
-		avg_wpoly, avg_epoly,
-		glwidth, glheight);
-
-	fclose (f);
-	Con_Printf ("profile: saved to %s\n", path);
-}
-
 void CL_FinishTimeDemo (void)
 {
 	int		frames;
@@ -424,7 +365,9 @@ void CL_FinishTimeDemo (void)
 
 	if (cls.profile)
 	{
-		CL_WriteProfileJSON (frames, time, fps);
+		// Flush any outstanding profiler queries and write JSON.
+		// Prof_Finish is a no-op if not running.
+		Prof_Finish ();
 		cls.profile = false;
 		Sys_Quit ();
 	}
@@ -473,7 +416,7 @@ void CL_Profile_f (void)
 
 	if (Cmd_Argc() != 2)
 	{
-		Con_Printf ("profile <demoname> : benchmark and save results to JSON\n");
+		Con_Printf ("profile <demoname> : benchmark and save per-section JSON\n");
 		return;
 	}
 
@@ -483,13 +426,32 @@ void CL_Profile_f (void)
 	cls.profile = true;
 	cls.td_startframe = host_framecount;
 	cls.td_lastframe = -1;
+	cls.pp_framecount = 0;
 
-	// reset profile stats
-	profile_frame_min = 999.0;
-	profile_frame_max = 0.0;
-	profile_frame_last = 0.0;
-	profile_total_wpoly = 0;
-	profile_total_epoly = 0;
+	// Arm the per-section profiler for this demo. First call of any draw is
+	// then gated by g_target_frames[]; samples are taken on the exact same
+	// network frames across builds.
+	Prof_Start (Cmd_Argv(1));
+}
+
+/*
+====================
+CL_ProfileLiveStart_f
+
+profile_live_start
+Start profiling live gameplay: sample every N-th render frame (see
+profile_live_every) until 100 samples are collected or profile_live_stop
+is issued. Does NOT auto-quit on completion -- the user stays in the game.
+====================
+*/
+void CL_ProfileLiveStart_f (void)
+{
+	Prof_StartLive ();
+}
+
+void CL_ProfileLiveStop_f (void)
+{
+	Prof_StopLive ();
 }
 
 /*

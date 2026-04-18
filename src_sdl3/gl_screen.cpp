@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_profiler.h"
 
 /*
 
@@ -782,7 +783,10 @@ void SCR_UpdateScreen (void)
 
 
 	GL_BeginRendering (&glx, &gly, &glwidth, &glheight);
-	
+
+	Prof_BeginFrame ();
+	Prof_BeginSection (PROF_FRAME_TOTAL);
+
 	//
 	// determine size of refresh window
 	//
@@ -809,8 +813,7 @@ void SCR_UpdateScreen (void)
 	
 	V_RenderView ();
 
-	DOF_Apply ();
-
+	Prof_BeginSection (PROF_HUD_2D);
 	GL_Set2D ();
 
 	//
@@ -854,13 +857,15 @@ void SCR_UpdateScreen (void)
 			cross = crosshair.value;
 
 			if(cross>10)
-			{	
-				crosshair.value = 0; 
+			{
+				crosshair.value = 0;
 				Cvar_SetValue ("crosshair", crosshair.value);
-				return;
 			}
-			cross --;
-			Draw_Crosshair(cross);
+			else
+			{
+				cross --;
+				Draw_Crosshair(cross);
+			}
 		}	
 		SCR_DrawNet ();
 		SCR_DrawTurtle ();
@@ -889,6 +894,13 @@ void SCR_UpdateScreen (void)
 	}
 
 //	GL_BrightenScreen ();
+	Prof_EndSection (PROF_HUD_2D);
+
+	Prof_BeginSection (PROF_SWAP);
 	GL_EndRendering ();
+	Prof_EndSection (PROF_SWAP);
+
+	Prof_EndSection (PROF_FRAME_TOTAL);
+	Prof_EndFrame ();
 }
 

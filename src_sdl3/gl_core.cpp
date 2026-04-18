@@ -92,6 +92,7 @@ void DynamicVBO_Init(DynamicVBO *d, GLsizei capacity_bytes)
 	glGenVertexArrays(1, &d->vao);
 	glGenBuffers(1, &d->vbo);
 	d->capacity = capacity_bytes;
+	d->head = 0;
 
 	glBindVertexArray(d->vao);
 	glBindBuffer(GL_ARRAY_BUFFER, d->vbo);
@@ -123,6 +124,43 @@ void DynamicVBO_Upload(DynamicVBO *d, const void *data, GLsizei nbytes)
 	// without stalling on in-flight draws.
 	glBufferData(GL_ARRAY_BUFFER, d->capacity, NULL, GL_STREAM_DRAW);
 	glBufferSubData(GL_ARRAY_BUFFER, 0, nbytes, data);
+	d->head = 0; // streaming head irrelevant for the orphan path
+}
+
+// Ring-streaming upload. Writes `nbytes` at the current head, using
+// GL_MAP_INVALIDATE_RANGE_BIT + GL_MAP_UNSYNCHRONIZED_BIT so the driver does
+// NOT wait for in-flight draws that use earlier regions of the same buffer.
+// On wrap, we invalidate the whole buffer (rare -- happens when the ring is
+// full, which means we've consumed `capacity` bytes of vertex data in one
+// frame, very unusual).
+GLsizei DynamicVBO_UploadStream(DynamicVBO *d, const void *data, GLsizei nbytes)
+{
+	if (nbytes <= 0) return 0;
+	glBindBuffer(GL_ARRAY_BUFFER, d->vbo);
+
+	// If this write wouldn't fit before the end, wrap to 0 and orphan.
+	if (d->head + nbytes > d->capacity) {
+		glBufferData(GL_ARRAY_BUFFER, d->capacity, NULL, GL_STREAM_DRAW);
+		d->head = 0;
+	}
+
+	// Map unsynchronized + invalidate-range: the driver gives us a writable
+	// pointer without waiting. We only overwrite bytes the GPU isn't reading
+	// because we always write past the previous write's end.
+	GLbitfield flags = GL_MAP_WRITE_BIT
+	                 | GL_MAP_UNSYNCHRONIZED_BIT
+	                 | GL_MAP_INVALIDATE_RANGE_BIT;
+	void *p = glMapBufferRange(GL_ARRAY_BUFFER, d->head, nbytes, flags);
+	GLsizei offset = d->head;
+	if (p) {
+		memcpy(p, data, nbytes);
+		glUnmapBuffer(GL_ARRAY_BUFFER);
+	} else {
+		// Shouldn't happen on a healthy driver; fall back to subdata.
+		glBufferSubData(GL_ARRAY_BUFFER, d->head, nbytes, data);
+	}
+	d->head += nbytes;
+	return offset;
 }
 
 void DynamicVBO_Bind(const DynamicVBO *d)

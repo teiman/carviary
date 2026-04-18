@@ -275,6 +275,12 @@ dlight_t *CL_AllocDlight (int key)
 	int			i;
 	dlight_t	*dl;
 
+// Default color is white. Callers that want tinted dlights (lava, torches,
+// tarbaby explosion, etc.) overwrite dl->color[] after the Alloc. Leaving
+// the default at (1, 0.5, 0.25) meant every caller that forgot -- muzzleflash,
+// rocket explosion, EXPLOSION2 -- painted the walls orange.
+#define DLIGHT_DEFAULT_COLOR() do { dl->color[0] = 1; dl->color[1] = 1; dl->color[2] = 1; } while (0)
+
 // first look for an exact key match
 	if (key)
 	{
@@ -285,13 +291,7 @@ dlight_t *CL_AllocDlight (int key)
 			{
 				memset (dl, 0, sizeof(*dl));
 				dl->key = key;
-
-				// Tomaz - Lit Support Begin
-				dl->color[0] = 1;
-				dl->color[1] = 0.5;
-				dl->color[2] = 0.25;
-				// Tomaz - Lit Support End
-
+				DLIGHT_DEFAULT_COLOR();
 				return dl;
 			}
 		}
@@ -305,13 +305,7 @@ dlight_t *CL_AllocDlight (int key)
 		{
 			memset (dl, 0, sizeof(*dl));
 			dl->key = key;
-
-			// Tomaz - Lit Support Begin
-			dl->color[0] = 1;
-			dl->color[1] = 0.5;
-			dl->color[2] = 0.25;
-			// Tomaz - Lit Support End
-
+			DLIGHT_DEFAULT_COLOR();
 			return dl;
 		}
 	}
@@ -319,13 +313,7 @@ dlight_t *CL_AllocDlight (int key)
 	dl = &cl_dlights[0];
 	memset (dl, 0, sizeof(*dl));
 	dl->key = key;
-	
-	// Tomaz - Lit Support Begin
-	dl->color[0] = 1;
-	dl->color[1] = 0.5;
-	dl->color[2] = 0.25;
-	// Tomaz - Lit Support End
-
+	DLIGHT_DEFAULT_COLOR();
 	return dl;
 }
 
@@ -778,5 +766,7 @@ void CL_Init (void)
 	Cmd_AddCommand ("timedemo", CL_TimeDemo_f);
 	Cmd_AddCommand ("profile", CL_Profile_f);
 	Cmd_AddCommand ("playprofile", CL_PlayProfile_f);
+	Cmd_AddCommand ("profile_live_start", CL_ProfileLiveStart_f);
+	Cmd_AddCommand ("profile_live_stop", CL_ProfileLiveStop_f);
 }
 

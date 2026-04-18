@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "sdlquake.h"
+#include "gl_profiler.h"
 #include "gl_render.h"
 
 // GL 3.3 particle renderer state
@@ -1888,24 +1889,19 @@ void R_DrawParticles (qboolean inwater)
 	float mvp[16];
 	R_CurrentMVP(mvp);
 
-	// Save and adjust state. We must leave the fixed-function pipeline in the
-	// state the rest of the engine expects on return.
 	glDepthMask(GL_FALSE);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-	glDisable(GL_TEXTURE_2D);
 
 	GLShader_Use(&R_ParticleShader);
 	glUniformMatrix4fv(R_ParticleShader_u_mvp, 1, GL_FALSE, mvp);
 
 	DynamicVBO_Upload(&part_vbo, part_verts, (GLsizei)(nverts * sizeof(particle_vertex_t)));
 	DynamicVBO_Bind(&part_vbo);
+	Prof_CountDraw(nverts);
 	glDrawArrays(GL_TRIANGLES, 0, nverts);
 
-	// Leave a clean state for the legacy fixed-function paths that run after us.
 	glBindVertexArray(0);
 	glUseProgram(0);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDepthMask(GL_TRUE);
-	glEnable(GL_TEXTURE_2D);
-	glColor4f(1, 1, 1, 1);
 }

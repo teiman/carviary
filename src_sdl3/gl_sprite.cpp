@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_profiler.h"
 
 typedef struct {
 	float x, y, z;
@@ -372,10 +373,10 @@ void R_DrawSpriteModel (entity_t *e)
 
 	DynamicVBO_Upload(&sprite_vbo, verts, sizeof(verts));
 	DynamicVBO_Bind(&sprite_vbo);
+	Prof_CountDraw(6);
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
 	glBindVertexArray(0);
 	glUseProgram(0);
 	glDepthMask(GL_TRUE);
-	glColor4f (1,1,1,1);
 }

@@ -5,6 +5,8 @@ Each R_Ensure* is idempotent; the first caller builds, the rest reuse.
 
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_mat4.h"
+#include "gl_profiler.h"
 
 GLShader R_ParticleShader;
 GLint    R_ParticleShader_u_mvp = -1;
@@ -414,19 +416,10 @@ qboolean R_EnsureWorldFullbrightShader(void)
 }
 
 // ---------------------------------------------------------------------------
+// Reads the current MVP from the CPU matrix stacks (r_projection, r_modelview).
 void R_CurrentMVP(float out[16])
 {
-	float proj[16], mv[16];
-	glGetFloatv(GL_PROJECTION_MATRIX, proj);
-	glGetFloatv(GL_MODELVIEW_MATRIX, mv);
-
-	for (int c = 0; c < 4; ++c)
-		for (int r = 0; r < 4; ++r) {
-			float s = 0.0f;
-			for (int k = 0; k < 4; ++k)
-				s += proj[k * 4 + r] * mv[c * 4 + k];
-			out[c * 4 + r] = s;
-		}
+	R_MVP(out);
 }
 
 // ---------------------------------------------------------------------------
@@ -487,6 +480,7 @@ void R_HudTexQuad(int x, int y, int w, int h, int texnum,
 
 	DynamicVBO_Upload(&hud_quad_vbo, verts, sizeof(verts));
 	DynamicVBO_Bind(&hud_quad_vbo);
+	Prof_CountDraw(6);
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
 	glBindVertexArray(0);
@@ -529,6 +523,7 @@ void R_HudFill(int x, int y, int w, int h, float r, float g, float b, float a)
 
 	DynamicVBO_Upload(&hud_fill_vbo, verts, sizeof(verts));
 	DynamicVBO_Bind(&hud_fill_vbo);
+	Prof_CountDraw(6);
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
 	glBindVertexArray(0);
@@ -617,6 +612,7 @@ void R_HudEndCharBatch(void)
 
 	DynamicVBO_Upload(&char_batch_vbo, char_batch_verts, (GLsizei)(char_batch_count * 6 * sizeof(hud_vtx_t)));
 	DynamicVBO_Bind(&char_batch_vbo);
+	Prof_CountDraw(char_batch_count * 6);
 	glDrawArrays(GL_TRIANGLES, 0, char_batch_count * 6);
 
 	glBindVertexArray(0);

@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_profiler.h"
 
 // Per-vertex layout for the hud_2d shader.
 typedef struct {
@@ -295,11 +296,11 @@ void Draw_Crosshair (int num)
 
 	DynamicVBO_Upload(&crosshair_vbo, verts, sizeof(verts));
 	DynamicVBO_Bind(&crosshair_vbo);
+	Prof_CountDraw(6);
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
 	glBindVertexArray(0);
 	glUseProgram(0);
-	glColor4f(1,1,1,1);
 }
 
 //=============================================================================

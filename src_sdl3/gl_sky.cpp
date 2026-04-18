@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_profiler.h"
 
 typedef struct {
 	float x, y, z;
@@ -126,6 +127,7 @@ flush:
 
 	DynamicVBO_Upload(&skypoly_vbo, skypoly_soup, (GLsizei)(n * sizeof(sky_poly_vtx_t)));
 	DynamicVBO_Bind(&skypoly_vbo);
+	Prof_CountDraw(n);
 	glDrawArrays(GL_TRIANGLES, 0, n);
 }
 
@@ -282,6 +284,7 @@ void R_DrawSkyBox (void)
 
 		glBindTexture(GL_TEXTURE_2D, skytexture[skytexorder[skybox_face_tex[f]]]);
 		DynamicVBO_Upload(&skybox_vbo, v, sizeof(v));
+		Prof_CountDraw(6);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
 
@@ -338,8 +341,12 @@ void R_InitSky (byte *src, int bytesperpixel)
 	}
 
 	if (!solidskytexture)
-		solidskytexture = texture_extension_number++;
-	glBindTexture (GL_TEXTURE_2D, solidskytexture );
+	{
+		GLuint id = 0;
+		glGenTextures(1, &id);
+		solidskytexture = (int)id;
+	}
+	glBindTexture (GL_TEXTURE_2D, solidskytexture);
 	glTexImage2D (GL_TEXTURE_2D, 0, gl_solid_format, 128, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, trans);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -365,7 +372,11 @@ void R_InitSky (byte *src, int bytesperpixel)
 	}
 
 	if (!alphaskytexture)
-		alphaskytexture = texture_extension_number++;
+	{
+		GLuint id = 0;
+		glGenTextures(1, &id);
+		alphaskytexture = (int)id;
+	}
 	glBindTexture (GL_TEXTURE_2D, alphaskytexture);
 	glTexImage2D (GL_TEXTURE_2D, 0, gl_alpha_format, 128, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, trans);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

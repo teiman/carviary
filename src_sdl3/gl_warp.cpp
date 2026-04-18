@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 #include "quakedef.h"
 #include "gl_render.h"
+#include "gl_profiler.h"
 
 //
 // gl_warp.c -- sky and water polygons
@@ -63,14 +64,15 @@ typedef struct {
 // Generous capacity: water surfaces get subdivided up to 64 unit grid,
 // generating many small polys per surface chain.
 #define WARP_MAX_VERTS 16384
-static warp_vtx_t warp_soup[WARP_MAX_VERTS];
-static DynamicVBO warp_vbo;
+warp_vtx_t warp_soup[WARP_MAX_VERTS];
+DynamicVBO warp_vbo;
 static qboolean   warp_vbo_ready = false;
 
-static void Warp_EnsureVBO(void)
+void Warp_EnsureVBO(void)
 {
 	if (warp_vbo_ready) return;
-	DynamicVBO_Init(&warp_vbo, sizeof(warp_soup));
+	// 4x capacity so the streaming ring rarely wraps (see DynamicVBO_UploadStream).
+	DynamicVBO_Init(&warp_vbo, 4 * (GLsizei)sizeof(warp_soup));
 	DynamicVBO_SetAttrib(&warp_vbo, 0, 3, GL_FLOAT, GL_FALSE, sizeof(warp_vtx_t), offsetof(warp_vtx_t, x));
 	DynamicVBO_SetAttrib(&warp_vbo, 1, 2, GL_FLOAT, GL_FALSE, sizeof(warp_vtx_t), offsetof(warp_vtx_t, s));
 	warp_vbo_ready = true;
@@ -242,25 +244,25 @@ Warp is computed per-fragment by the `world_water` shader, so the motion
 stays smooth regardless of `gl_subdivide_size`.
 =============
 */
-void EmitWaterPolys (msurface_t *s, float alpha)
+// Append one water surface's triangulated fan verts to `dst` starting at
+// position `*n_inout`. Clamps to `cap`. Applies r_wave vertical offset per
+// vertex if the cvar is on. Returns how many verts were appended (0 if skipped).
+//
+// This is the CPU-heavy core of water rendering. The GL draw is now issued
+// once per texture from R_DrawWaterSurfaces after the whole soup is built.
+int Water_AppendSurface (msurface_t *s, warp_vtx_t *dst, int *n_inout, int cap)
 {
-	glpoly_t	*p;
-	float		*v;
-	int			i;
-
-	if (!R_EnsureWorldWaterShader()) return;
-	Warp_EnsureVBO();
-
+	int n = *n_inout;
+	int added = 0;
 	static warp_vtx_t fan[256];
-	int n = 0;
 
-	for (p = s->polys; p; p = p->next)
+	for (glpoly_t *p = s->polys; p; p = p->next)
 	{
 		int nv = p->numverts;
 		if (nv > 256) nv = 256;
 
-		v = p->verts[0];
-		for (i = 0; i < nv; ++i, v += VERTEXSIZE)
+		float *v = p->verts[0];
+		for (int i = 0; i < nv; ++i, v += VERTEXSIZE)
 		{
 			fan[i].x = v[0];
 			fan[i].y = v[1];
@@ -275,14 +277,29 @@ void EmitWaterPolys (msurface_t *s, float alpha)
 
 		for (int k = 1; k < nv - 1; ++k)
 		{
-			if (n + 3 > WARP_MAX_VERTS) goto flush;
-			warp_soup[n++] = fan[0];
-			warp_soup[n++] = fan[k];
-			warp_soup[n++] = fan[k + 1];
+			if (n + 3 > cap) goto done; // soup full; caller should flush earlier
+			dst[n++] = fan[0];
+			dst[n++] = fan[k];
+			dst[n++] = fan[k + 1];
+			added += 3;
 		}
 	}
 
-flush:
+done:
+	*n_inout = n;
+	return added;
+}
+
+// Legacy single-surface path, kept for brush-entity water (R_DrawBrushMTexTrans
+// on SURF_DRAWTURB). The world's waterchain takes the batched path in
+// R_DrawWaterSurfaces. Same pixel output, just per-surface GL cost.
+void EmitWaterPolys (msurface_t *s, float alpha)
+{
+	if (!R_EnsureWorldWaterShader()) return;
+	Warp_EnsureVBO();
+
+	int n = 0;
+	Water_AppendSurface (s, warp_soup, &n, WARP_MAX_VERTS);
 	if (n == 0) return;
 
 	float mvp[16];
@@ -303,6 +320,7 @@ flush:
 
 	DynamicVBO_Upload(&warp_vbo, warp_soup, (GLsizei)(n * sizeof(warp_vtx_t)));
 	DynamicVBO_Bind(&warp_vbo);
+	Prof_CountDraw(n);
 	glDrawArrays(GL_TRIANGLES, 0, n);
 
 	if (!blend_was_on && alpha < 1.0f) glDisable(GL_BLEND);
@@ -375,6 +393,7 @@ flush:
 
 	DynamicVBO_Upload(&warp_vbo, warp_soup, (GLsizei)(n * sizeof(warp_vtx_t)));
 	DynamicVBO_Bind(&warp_vbo);
+	Prof_CountDraw(n);
 	glDrawArrays(GL_TRIANGLES, 0, n);
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

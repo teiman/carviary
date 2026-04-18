@@ -46,7 +46,6 @@ extern	BINDTEXFUNCPTR bindTexFunc;
 extern	DELTEXFUNCPTR delTexFunc;
 extern	TEXSUBIMAGEPTR TexSubImage2DFunc;
 
-extern	int texture_extension_number;
 extern	int		texture_mode;
 extern	float	gldepthmin, gldepthmax;
 
@@ -103,7 +102,7 @@ extern	mleaf_t		*r_viewleaf, *r_oldviewleaf;
 extern	texture_t	*r_notexture_mip;
 extern	int		d_lightstylevalue[256];	// 8.8 fraction of base light value
 
-extern	int	playertextures;
+extern	GLuint	playertextures[16];
 
 extern	cvar_t	r_norefresh;
 extern	cvar_t	r_drawviewmodel;
@@ -131,12 +130,7 @@ extern	cvar_t	gl_max_size;
 extern	cvar_t	slowmo;		// Tomaz - Slowmo
 
 // Tomaz - Fog Begin
-extern  cvar_t  gl_fogenable; 
-extern  cvar_t  gl_fogstart;
-extern  cvar_t  gl_fogend; 
-extern  cvar_t  gl_fogred; 
-extern  cvar_t  gl_fogblue; 
-extern  cvar_t  gl_foggreen; 
+ 
 // Tomaz - Fog End
 
 extern  cvar_t  centerfade;		// Tomaz - Fading CenterPrints
@@ -163,22 +157,6 @@ extern	const char *gl_version;
 extern	const char *gl_extensions;
 
 void R_TranslatePlayerSkin (int playernum);
-
-// Multitexture
-#define		TEXTURE0_SGIS		0x835E
-#define		TEXTURE1_SGIS		0x835F
-
-#define		TEXTURE0_ARB		0x84C0
-#define		TEXTURE1_ARB		0x84C1
-
-extern GLenum TEXTURE0_SGIS_ARB;
-extern GLenum TEXTURE1_SGIS_ARB;
-
-typedef void (APIENTRY *lpMTexFUNC) (GLenum, GLfloat, GLfloat);
-typedef void (APIENTRY *lpSelTexFUNC) (GLenum);
-
-extern lpMTexFUNC qglMTexCoord2fSGIS_ARB;
-extern lpSelTexFUNC qglSelectTextureSGIS_ARB;
 
 void EmitWaterPolys		(msurface_t *s, float alpha);
 void EmitSkyPolys		(msurface_t *s);

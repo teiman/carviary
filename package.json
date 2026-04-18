@@ -9,6 +9,6 @@
     "start:sdl3": "cd d:\\quake && carviary_sdl3.exe",
     "profile": "node scripts/profile.js",
     "debug": "node scripts/debug.js",
-    "analyze": "cd d:\\quake && .\\carviary.exe +map start +analyze +quit"
+    "analyze": "node scripts/analyze.js"
   }
 }
