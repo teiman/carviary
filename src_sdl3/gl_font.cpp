@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 
 #include "quakedef.h"
+#include "gl_render.h"
 
 float		scr_centertime_start;	// for slow victory printing
 float		scr_centertime_off;
@@ -78,48 +79,45 @@ It can be clipped to the top of the screen to allow the console to be
 smoothly scrolled off.
 ================
 */
+// Current color applied by Draw_Character (set via glColor-equivalent in the
+// string parser; kept in a static so the batched path can respect it).
+static float char_color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+static qboolean char_batching = false;
+
+void Draw_BeginCharBatch (void)
+{
+	if (char_batching)
+		return;
+	char_batching = true;
+	R_HudBeginCharBatch(char_texture);
+}
+
+void Draw_EndCharBatch (void)
+{
+	if (!char_batching)
+		return;
+	R_HudEndCharBatch();
+	char_batching = false;
+}
+
 void Draw_Character (int x, int y, int num)
 {
-	int				row, col;
-	float			frow, fcol;
+	qboolean self_batch;
 
-	//
-	// Don't print spaces
-	//
 	if (num == 32)
-		return;	
+		return;
 
-	//
-	// Return if we go offscreen
-	//
 	if (y <= -8)
 		return;
 
-	//
-	// 255 chars in one charset
-	//
-	num &= 255;
+	self_batch = !char_batching;
+	if (self_batch)
+		Draw_BeginCharBatch();
 
-	row = num>>4;
-	col = num&15;
+	R_HudAddChar(x, y, num, char_color[0], char_color[1], char_color[2], char_color[3]);
 
-	//
-	// Split up in 8X8 pictures
-	//
-	frow = row*0.0625;
-	fcol = col*0.0625;
-
-	//
-	// Draw the characters
-	//
-	glBindTexture (GL_TEXTURE_2D, char_texture);
-
-	glBegin (GL_QUADS);
-		glTexCoord2f (fcol,				frow);			glVertex2f (x,		y);
-		glTexCoord2f (fcol + 0.0625,	frow);			glVertex2f (x + 8,	y);
-		glTexCoord2f (fcol + 0.0625,	frow + 0.0625);	glVertex2f (x + 8,	y + 8);
-		glTexCoord2f (fcol,				frow + 0.0625);	glVertex2f (x,		y + 8);
-	glEnd ();
+	if (self_batch)
+		Draw_EndCharBatch();
 }
 
 /*
@@ -132,21 +130,14 @@ void Draw_Alt_String (int x, int y, char *str, int maxlen)
 	float	r, g, b;
 	int		len;
 	int		num;
-	int		row, col;
-	float	frow, fcol;
 
-	//
-	// Return if we go offscreen
-	//
 	if (y <= -8)
 		return;
 
 	len = (maxlen) ? maxlen : strlen(str);
 
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
-	glBindTexture (GL_TEXTURE_2D, char_texture);
-	glBegin (GL_QUADS);
+	R_HudBeginCharBatch(char_texture);
+	float cr = 1.0f, cg = 1.0f, cb = 1.0f;
 
 	while (*str && len)
 	{
@@ -155,117 +146,43 @@ void Draw_Alt_String (int x, int y, char *str, int maxlen)
 			++str;
 			len--;
 
-			if (!*str)
-			{
-				return;
-			}
+			if (!*str) { R_HudEndCharBatch(); return; }
 
 			switch(*str)
 			{
 			case 'f':
 				{
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					r = (float)(*str - '0') * 0.11111111f;
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					g = (float)(*str - '0') * 0.11111111f;
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					b = (float)(*str - '0') * 0.11111111f;
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
 
-					r = (float)(*str - '0') * 0.11111111;
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					g = (float)(*str - '0') * 0.11111111;
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					b = (float)(*str - '0') * 0.11111111;
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					glColor3f(r,g,b);
-
+					cr = r; cg = g; cb = b;
 					break;
 				}
 			case 'r':
 				{
-					glColor3f(1,1,1);
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
+					cr = 1.0f; cg = 1.0f; cb = 1.0f;
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
 				}
 
 			default:
 				{
-					--str;
-					len++;
+					--str; len++;
 				}
 			}
 		}
 
 		if (*str != 32)
 		{
-			//
-			// 255 chars in one charset
-			//
-			num = (int)(*str|128);
-			num &= 255;
-
-			row = num>>4;
-			col = num&15;
-
-			//
-			// Split up in 8X8 pictures
-			//
-			frow = row*0.0625;
-			fcol = col*0.0625;
-
-			//
-			// Draw the characters
-			//
-			glTexCoord2f (fcol,				frow);			glVertex2f (x,		y);
-			glTexCoord2f (fcol + 0.0625,	frow);			glVertex2f (x + 8,	y);
-			glTexCoord2f (fcol + 0.0625,	frow + 0.0625);	glVertex2f (x + 8,	y + 8);
-			glTexCoord2f (fcol,				frow + 0.0625);	glVertex2f (x,		y + 8);
+			num = (int)(*str | 128);
+			R_HudAddChar(x, y, num, cr, cg, cb, 1.0f);
 		}
 
 		++str;
@@ -277,10 +194,7 @@ void Draw_Alt_String (int x, int y, char *str, int maxlen)
 			y += 8;
 	}
 
-	glEnd ();
-	glColor3f(1,1,1);
-
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+	R_HudEndCharBatch();
 }
 
 /*
@@ -293,21 +207,14 @@ void Draw_String (int x, int y, char *str, int maxlen)
 	float	r, g, b;
 	int		len;
 	int		num;
-	int		row, col;
-	float	frow, fcol;
 
-	//
-	// Return if we go offscreen
-	//
 	if (y <= -8)
 		return;
 
 	len = (maxlen) ? maxlen : strlen(str);
 
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
-	glBindTexture (GL_TEXTURE_2D, char_texture);
-	glBegin (GL_QUADS);
+	R_HudBeginCharBatch(char_texture);
+	float cr = 1.0f, cg = 1.0f, cb = 1.0f;
 
 	while (*str && len)
 	{
@@ -316,117 +223,43 @@ void Draw_String (int x, int y, char *str, int maxlen)
 			++str;
 			len--;
 
-			if (!*str)
-			{
-				return;
-			}
+			if (!*str) { R_HudEndCharBatch(); return; }
 
 			switch(*str)
 			{
 			case 'f':
 				{
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					r = (float)(*str - '0') * 0.11111111f;
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					g = (float)(*str - '0') * 0.11111111f;
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					b = (float)(*str - '0') * 0.11111111f;
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
 
-					r = (float)(*str - '0') * 0.11111111;
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					g = (float)(*str - '0') * 0.11111111;
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					b = (float)(*str - '0') * 0.11111111;
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-
-					glColor3f(r,g,b);
-
+					cr = r; cg = g; cb = b;
 					break;
 				}
 			case 'r':
 				{
-					glColor3f(1,1,1);
-
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
-					++str;
-					len--;
-					if(!*str)
-					{
-						return;
-					}
+					cr = 1.0f; cg = 1.0f; cb = 1.0f;
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
+					++str; len--; if(!*str) { R_HudEndCharBatch(); return; }
 				}
 
 			default:
 				{
-					--str;
-					len++;
+					--str; len++;
 				}
 			}
 		}
 
 		if (*str != 32)
 		{
-			//
-			// 255 chars in one charset
-			//
 			num = (int)*str;
-			num &= 255;
-
-			row = num>>4;
-			col = num&15;
-
-			//
-			// Split up in 8X8 pictures
-			//
-			frow = row*0.0625;
-			fcol = col*0.0625;
-
-			//
-			// Draw the characters
-			//
-			glTexCoord2f (fcol,				frow);			glVertex2f (x,		y);
-			glTexCoord2f (fcol + 0.0625,	frow);			glVertex2f (x + 8,	y);
-			glTexCoord2f (fcol + 0.0625,	frow + 0.0625);	glVertex2f (x + 8,	y + 8);
-			glTexCoord2f (fcol,				frow + 0.0625);	glVertex2f (x,		y + 8);
+			R_HudAddChar(x, y, num, cr, cg, cb, 1.0f);
 		}
 
 		++str;
@@ -438,10 +271,7 @@ void Draw_String (int x, int y, char *str, int maxlen)
 			y += 8;
 	}
 
-	glEnd ();
-	glColor3f(1,1,1);
-
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+	R_HudEndCharBatch();
 }
 
 
@@ -531,8 +361,6 @@ void SCR_DrawCenterString (void)
 	int		remaining;
 	float	fade;
 
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
 // the finale prints the characters one at a time
 	if (cl.intermission)
 		remaining = scr_printspeed.value * (cl.time - scr_centertime_start);
@@ -547,7 +375,7 @@ void SCR_DrawCenterString (void)
 	else
 		y = 48;
 
-	do	
+	do
 	{
 	// scan the width of the line
 		for (l=0 ; l<40 ; l++)
@@ -559,7 +387,7 @@ void SCR_DrawCenterString (void)
 		{
 			if (cl.time - scr_centertime_start < 1)
 				fade =  (cl.time - scr_centertime_start);
-			else	
+			else
 				fade = -(cl.time - scr_centertime_start) + 2;
 		}
 		else
@@ -568,13 +396,13 @@ void SCR_DrawCenterString (void)
 		for (j=0 ; j<l ; j++, x+=8)
 		{
 			if (!cl.intermission && centerfade.value)
-				glColor4f(1,1,1,fade);
+				char_color[3] = fade;
 
-			Draw_Character (x, y, start[j]);	
-			
+			Draw_Character (x, y, start[j]);
+
 			if (!remaining--)
 			{
-				glColor4f(1,1,1,1);
+				char_color[0] = char_color[1] = char_color[2] = char_color[3] = 1.0f;
 				return;
 			}
 		}
@@ -589,8 +417,7 @@ void SCR_DrawCenterString (void)
 		start++;		// skip the \n
 	} while (1);
 
-	glColor4f(1,1,1,1);	
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+	char_color[0] = char_color[1] = char_color[2] = char_color[3] = 1.0f;
 }
 
 void SCR_CheckDrawCenterString (void)

@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "quakedef.h"
+#include "gl_render.h"
 
 /*
 
@@ -388,21 +389,9 @@ void GL_BrightenScreen (void)
 
 	if (f >= 1.01f)
 	{
-		glDisable (GL_TEXTURE_2D);
 		glBlendFunc (GL_DST_COLOR, GL_ONE);
-
-		glBegin (GL_TRIANGLES);
-
-		glColor3f (f-1, f-1, f-1);
-
-		glVertex2f (-5000, -5000);
-		glVertex2f (10000, -5000);
-		glVertex2f (-5000, 10000);
-
-		glEnd ();
-
+		R_HudFill(-5000, -5000, 15000, 15000, f - 1, f - 1, f - 1, 1.0f);
 		glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glEnable(GL_TEXTURE_2D);
 	}
 }
 
@@ -543,13 +532,71 @@ typedef struct _TargaHeader {
 	unsigned char	pixel_size, attributes;
 } TargaHeader;
 
+/*
+==================
+SCR_PlayProfileShot
+
+Takes a screenshot for playprofile, saved to screenies/playprofile/ with
+sequential numbering (pp0000.tga, pp0001.tga, ...)
+==================
+*/
+void SCR_PlayProfileShot (int shotnum)
+{
+	byte		*buffer;
+	char		tganame[80];
+	char		checkname[MAX_OSPATH];
+	int			i, c, temp;
+	FILE		*f;
+
+	_snprintf (checkname, sizeof(checkname), "%s/screenies", com_gamedir);
+	Sys_mkdir (checkname);
+	_snprintf (checkname, sizeof(checkname), "%s/screenies/playprofile", com_gamedir);
+	Sys_mkdir (checkname);
+
+	_snprintf (tganame, sizeof(tganame), "pp%04d.tga", shotnum);
+	_snprintf (checkname, sizeof(checkname), "%s/screenies/playprofile/%s", com_gamedir, tganame);
+
+	buffer = (byte *)malloc(glwidth*glheight*3 + 18);
+	memset (buffer, 0, 18);
+	buffer[2] = 2;		// uncompressed type
+	buffer[12] = glwidth&255;
+	buffer[13] = glwidth>>8;
+	buffer[14] = glheight&255;
+	buffer[15] = glheight>>8;
+	buffer[16] = 24;	// pixel size
+
+	glReadPixels (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer+18);
+
+	// swap rgb to bgr
+	c = 18+glwidth*glheight*3;
+	for (i=18 ; i<c ; i+=3)
+	{
+		temp = buffer[i];
+		buffer[i] = buffer[i+2];
+		buffer[i+2] = temp;
+	}
+
+	f = fopen (checkname, "wb");
+	if (f)
+	{
+		fwrite (buffer, 1, glwidth*glheight*3 + 18, f);
+		fclose (f);
+	}
+	else
+	{
+		Con_Printf ("playprofile: couldn't write %s\n", checkname);
+	}
+
+	free (buffer);
+}
+
 // Tomaz - Redone ScreenShot Begin
-/* 
-================== 
+/*
+==================
 SCR_ScreenShot_f
-================== 
-*/  
-void SCR_ScreenShot_f (void) 
+==================
+*/
+void SCR_ScreenShot_f (void)
 {
 	byte		*buffer;
 	char		tganame[80]; 
@@ -829,6 +876,17 @@ void SCR_UpdateScreen (void)
 		SCR_DrawFPS ();
 
 	V_UpdatePalette ();
+
+	// playprofile: take screenshot every 100 net frames
+	if (cls.playprofile && cls.pp_framecount > 0 && (cls.pp_framecount % 100) == 0)
+	{
+		int expected_shot = cls.pp_framecount / 100;
+		if (expected_shot > cls.pp_shotcount)
+		{
+			SCR_PlayProfileShot (cls.pp_shotcount);
+			cls.pp_shotcount++;
+		}
+	}
 
 //	GL_BrightenScreen ();
 	GL_EndRendering ();

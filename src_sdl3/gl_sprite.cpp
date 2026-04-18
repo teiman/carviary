@@ -22,6 +22,26 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 
 #include "quakedef.h"
+#include "gl_render.h"
+
+typedef struct {
+	float x, y, z;
+	float s, t;
+} sprite_vertex_t;
+
+static DynamicVBO sprite_vbo;
+static qboolean   sprite_vbo_ready = false;
+
+static void Sprite_EnsureVBO(void)
+{
+	if (sprite_vbo_ready) return;
+	if (!R_EnsureSpriteShader()) return;
+
+	DynamicVBO_Init(&sprite_vbo, 6 * sizeof(sprite_vertex_t));
+	DynamicVBO_SetAttrib(&sprite_vbo, 0, 3, GL_FLOAT, GL_FALSE, sizeof(sprite_vertex_t), offsetof(sprite_vertex_t, x));
+	DynamicVBO_SetAttrib(&sprite_vbo, 1, 2, GL_FLOAT, GL_FALSE, sizeof(sprite_vertex_t), offsetof(sprite_vertex_t, s));
+	sprite_vbo_ready = true;
+}
 
 typedef struct mspriteframe_s
 {
@@ -291,12 +311,13 @@ R_DrawSpriteModel
 */
 void R_DrawSpriteModel (entity_t *e)
 {
-	vec3_t	point;
 	mspriteframe_t	*frame;
-	vec3_t			forward, right, up;
+	vec3_t			right, up;
 	msprite_t		*psprite;
 
-	glDepthMask(false);
+	Sprite_EnsureVBO();
+	if (!sprite_vbo_ready)
+		return;
 
 	// don't even bother culling, because it's just a single
 	// polygon without a surface cache
@@ -305,6 +326,7 @@ void R_DrawSpriteModel (entity_t *e)
 
 	if (psprite->type == SPR_ORIENTED)
 	{	// bullet marks on walls
+		vec3_t forward;
 		AngleVectors (e->angles, forward, right, up);
 	}
 	else
@@ -313,39 +335,47 @@ void R_DrawSpriteModel (entity_t *e)
 		VectorCopy(vright, right);
 	}
 
-	glPushMatrix();
+	// Pre-scale the billboard offsets so the shader MVP stays the scene's
+	// plain view-projection (no per-sprite glScalef needed).
+	float s   = e->scale;
+	float l   = frame->left  * s;
+	float r   = frame->right * s;
+	float dn  = frame->down  * s;
+	float upv = frame->up    * s;
 
-	glScalef  (e->scale, e->scale, e->scale);
-	glColor4f (1,1,1,e->alpha);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-    glBindTexture (GL_TEXTURE_2D, frame->gl_texturenum);
+	vec3_t p_dl, p_ul, p_ur, p_dr;
+	VectorMA (e->origin, dn,  up,    p_dl); VectorMA (p_dl, l, right, p_dl);
+	VectorMA (e->origin, upv, up,    p_ul); VectorMA (p_ul, l, right, p_ul);
+	VectorMA (e->origin, upv, up,    p_ur); VectorMA (p_ur, r, right, p_ur);
+	VectorMA (e->origin, dn,  up,    p_dr); VectorMA (p_dr, r, right, p_dr);
 
-	glBegin (GL_QUADS);
+	sprite_vertex_t verts[6] = {
+		{p_dl[0], p_dl[1], p_dl[2], 0, 1},
+		{p_ul[0], p_ul[1], p_ul[2], 0, 0},
+		{p_ur[0], p_ur[1], p_ur[2], 1, 0},
+		{p_dl[0], p_dl[1], p_dl[2], 0, 1},
+		{p_ur[0], p_ur[1], p_ur[2], 1, 0},
+		{p_dr[0], p_dr[1], p_dr[2], 1, 1},
+	};
 
-	glTexCoord2f (0, 1);
-	VectorMA (e->origin, frame->down, up, point);
-	VectorMA (point, frame->left, right, point);
-	glVertex3fv (point);
+	float mvp[16];
+	R_CurrentMVP(mvp);
 
-	glTexCoord2f (0, 0);
-	VectorMA (e->origin, frame->up, up, point);
-	VectorMA (point, frame->left, right, point);
-	glVertex3fv (point);
+	glDepthMask(GL_FALSE);
 
-	glTexCoord2f (1, 0);
-	VectorMA (e->origin, frame->up, up, point);
-	VectorMA (point, frame->right, right, point);
-	glVertex3fv (point);
+	glBindTexture (GL_TEXTURE_2D, frame->gl_texturenum);
 
-	glTexCoord2f (1, 1);
-	VectorMA (e->origin, frame->down, up, point);
-	VectorMA (point, frame->right, right, point);
-	glVertex3fv (point);
-	
-	glEnd ();
+	GLShader_Use(&R_SpriteShader);
+	glUniformMatrix4fv(R_SpriteShader_u_mvp, 1, GL_FALSE, mvp);
+	glUniform4f       (R_SpriteShader_u_color, 1.0f, 1.0f, 1.0f, e->alpha);
+	glUniform1i       (R_SpriteShader_u_tex, 0);
 
-	glDepthMask(true);
-	glPopMatrix();
+	DynamicVBO_Upload(&sprite_vbo, verts, sizeof(verts));
+	DynamicVBO_Bind(&sprite_vbo);
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+
+	glBindVertexArray(0);
+	glUseProgram(0);
+	glDepthMask(GL_TRUE);
 	glColor4f (1,1,1,1);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 }

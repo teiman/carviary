@@ -576,7 +576,7 @@ void PF_ambientsound (void)
 
 // add an svc_spawnambient command to the level signon packet
 
-	if (sv.protocol == PROTOCOL_RMQ && soundnum >= 256)
+	if (soundnum >= 256)
 	{
 		MSG_WriteByte (&sv.signon, svc_spawnstaticsound2);
 		for (i=0 ; i<3 ; i++)
@@ -1513,7 +1513,7 @@ void PF_makestatic (void)
 	ent = G_EDICT(OFS_PARM0);
 
 	// Offline mode: create static entity directly on the client
-	if (offline_mode)
+	if (0 && offline_mode)
 	{
 		if (cl.num_statics >= MAX_STATIC_ENTITIES)
 		{
@@ -1544,7 +1544,6 @@ void PF_makestatic (void)
 		return;
 	}
 
-	if (sv.protocol == PROTOCOL_RMQ)
 	{
 		int bits = 0;
 		int midx = SV_ModelIndex(pr_strings + ent->v.model);
@@ -1566,12 +1565,6 @@ void PF_makestatic (void)
 			MSG_WriteByte (&sv.signon, midx);
 			MSG_WriteByte (&sv.signon, ent->v.frame);
 		}
-	}
-	else
-	{
-		MSG_WriteByte (&sv.signon, svc_spawnstatic);
-		MSG_WriteByte (&sv.signon, SV_ModelIndex(pr_strings + ent->v.model));
-		MSG_WriteByte (&sv.signon, ent->v.frame);
 	}
 
 	MSG_WriteByte (&sv.signon, ent->v.colormap);

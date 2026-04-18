@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(carviary_sdl3 CXX)
+project(carviary_sdl3 C CXX)
 
 # Find SDL3
 find_package(SDL3 REQUIRED)
@@ -9,11 +9,15 @@ find_package(OpenGL REQUIRED)
 
 file(GLOB SOURCES ${CMAKE_SOURCE_DIR}/*.cpp)
 
-add_executable(carviary ${SOURCES})
+# GLAD loader (OpenGL 3.3 Compatibility)
+set(GLAD_SOURCES ${CMAKE_SOURCE_DIR}/third_party/glad/src/glad.c)
+
+add_executable(carviary ${SOURCES} ${GLAD_SOURCES})
 
 target_include_directories(carviary PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/headers
+    ${CMAKE_SOURCE_DIR}/third_party/glad/include
 )
 
 target_compile_definitions(carviary PRIVATE

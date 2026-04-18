@@ -19,7 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include <stdlib.h>
-#include <SDL3/SDL_opengl.h>
+#include <glad/glad.h>
 
 #ifdef _MSC_VER
 #pragma warning(disable : 4244)     // MIPS

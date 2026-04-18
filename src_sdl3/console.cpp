@@ -536,6 +536,8 @@ void Con_DrawNotify (void)
 
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);	// Tomaz - Colored Characters
 
+	Draw_BeginCharBatch();
+
 	v = 0;
 	for (i= con_current-NUM_CON_TIMES+1 ; i<=con_current ; i++)
 	{
@@ -581,7 +583,9 @@ void Con_DrawNotify (void)
 //		Draw_String (8, v, text, con_linewidth);
 		v += 8;
 		// Tomaz - Colored Characters End
-	} 
+	}
+
+	Draw_EndCharBatch();
 
 	if (key_dest == key_message)
 	{
@@ -641,6 +645,8 @@ void Con_DrawConsole (int lines, qboolean drawinput)
 
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); // Tomaz - Colored Characters
 
+	Draw_BeginCharBatch();
+
 //	for (i= con_current - rows + 1 ; i<=con_current ; i++, y+=8 )
 	for (i= con_current - rows + 1 ; i<=con_current - sb ; i++, y+=8) // Tomaz - Scroll Enhance End
 	{
@@ -690,6 +696,7 @@ void Con_DrawConsole (int lines, qboolean drawinput)
 	}
 	// Tomaz - Scroll Enhance End
 
+	Draw_EndCharBatch();
 
 	// draw the input prompt, user text, and cursor if desired
 	if (drawinput)

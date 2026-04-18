@@ -21,6 +21,29 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // this file is specific to the crosshair, since we use several crosshairs
 //
 #include "quakedef.h"
+#include "gl_render.h"
+
+// Per-vertex layout for the hud_2d shader.
+typedef struct {
+	float x, y;
+	float s, t;
+	unsigned char r, g, b, a;
+} hud_vertex_t;
+
+static DynamicVBO crosshair_vbo;
+static qboolean   crosshair_vbo_ready = false;
+
+static void Crosshair_EnsureVBO(void)
+{
+	if (crosshair_vbo_ready) return;
+	if (!R_EnsureHud2dShader()) return;
+
+	DynamicVBO_Init(&crosshair_vbo, 6 * sizeof(hud_vertex_t));
+	DynamicVBO_SetAttrib(&crosshair_vbo, 0, 2, GL_FLOAT,         GL_FALSE, sizeof(hud_vertex_t), offsetof(hud_vertex_t, x));
+	DynamicVBO_SetAttrib(&crosshair_vbo, 1, 2, GL_FLOAT,         GL_FALSE, sizeof(hud_vertex_t), offsetof(hud_vertex_t, s));
+	DynamicVBO_SetAttrib(&crosshair_vbo, 2, 4, GL_UNSIGNED_BYTE, GL_TRUE,  sizeof(hud_vertex_t), offsetof(hud_vertex_t, r));
+	crosshair_vbo_ready = true;
+}
 
 #define MAX_CROSSHAIR 10
 
@@ -234,27 +257,49 @@ void Draw_Crosshair (int num)
 	x = (vid.width /2) - 16; // was 14
 	y = (vid.height/2) - 8;  // was 14
 
-	//
-	// Start drawing
-	//
-	glColor4f(red,green,blue,alpha);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glBindTexture (GL_TEXTURE_2D, crosshair_texture[num]);
+	Crosshair_EnsureVBO();
+	if (!crosshair_vbo_ready)
+		return;
 
-	glBegin (GL_QUADS);
-	glTexCoord2f (0, 0);
-	glVertex2f (x, y);
-	glTexCoord2f (1, 0);
-	glVertex2f (x+xsize, y);
-	glTexCoord2f (1,1);
-	glVertex2f (x+xsize, y+ysize);
-	glTexCoord2f (0,1);
-	glVertex2f (x, y+ysize);
-	glEnd ();
-	
-	// restore display settings
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-	glColor4f(1,1,1,1); 
+	unsigned char cr = (unsigned char)(red   * 255.0f + 0.5f);
+	unsigned char cg = (unsigned char)(green * 255.0f + 0.5f);
+	unsigned char cb = (unsigned char)(blue  * 255.0f + 0.5f);
+	unsigned char ca = (unsigned char)(alpha * 255.0f + 0.5f);
+
+	float x0 = (float)x,          y0 = (float)y;
+	float x1 = (float)x + xsize,  y1 = (float)y + ysize;
+
+	hud_vertex_t verts[6] = {
+		{x0, y0, 0, 0, cr, cg, cb, ca},
+		{x1, y0, 1, 0, cr, cg, cb, ca},
+		{x1, y1, 1, 1, cr, cg, cb, ca},
+		{x0, y0, 0, 0, cr, cg, cb, ca},
+		{x1, y1, 1, 1, cr, cg, cb, ca},
+		{x0, y1, 0, 1, cr, cg, cb, ca},
+	};
+
+	// Ortho to pixel space: (0,0) top-left, (vid.width, vid.height) bottom-right.
+	float L = 0.0f, R = (float)vid.width, T = 0.0f, B = (float)vid.height;
+	float ortho[16] = {
+		 2.0f / (R - L), 0,               0, 0,
+		 0,              2.0f / (T - B),  0, 0,
+		 0,              0,              -1, 0,
+		-(R + L)/(R - L), -(T + B)/(T - B), 0, 1,
+	};
+
+	glBindTexture(GL_TEXTURE_2D, crosshair_texture[num]);
+
+	GLShader_Use(&R_Hud2dShader);
+	glUniformMatrix4fv(R_Hud2dShader_u_ortho, 1, GL_FALSE, ortho);
+	glUniform1i(R_Hud2dShader_u_tex, 0);
+
+	DynamicVBO_Upload(&crosshair_vbo, verts, sizeof(verts));
+	DynamicVBO_Bind(&crosshair_vbo);
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+
+	glBindVertexArray(0);
+	glUseProgram(0);
+	glColor4f(1,1,1,1);
 }
 
 //=============================================================================

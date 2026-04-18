@@ -68,6 +68,10 @@ void CL_StopPlayback (void)
 
 	if (cls.timedemo)
 		CL_FinishTimeDemo ();
+
+	cls.playprofile = false;
+	cls.pp_framecount = 0;
+	cls.pp_shotcount = 0;
 }
 
 /*
@@ -116,6 +120,9 @@ int CL_GetMessage (void)
 				if (host_framecount == cls.td_lastframe)
 					return 0;		// allready read this frame's message
 				cls.td_lastframe = host_framecount;
+
+				if (cls.playprofile)
+					cls.pp_framecount++;
 			// if this is the second frame, grab the real td_starttime
 			// so the bogus time on the first frame doesn't count
 				if (host_framecount == cls.td_startframe + 1)
@@ -405,6 +412,16 @@ void CL_FinishTimeDemo (void)
 	fps = frames / time;
 	Con_Printf ("%i frames\n%5.3f seconds\n%5.3f fps\n", frames, time, fps);
 
+	if (cls.playprofile)
+	{
+		Con_Printf ("playprofile: %i screenshots saved to screenies/playprofile/\n", cls.pp_shotcount);
+		Con_Printf ("playprofile: %i net frames, %5.3f seconds, %5.3f fps\n", frames, time, fps);
+		cls.playprofile = false;
+		cls.pp_framecount = 0;
+		cls.pp_shotcount = 0;
+		Sys_Quit ();
+	}
+
 	if (cls.profile)
 	{
 		CL_WriteProfileJSON (frames, time, fps);
@@ -473,5 +490,34 @@ void CL_Profile_f (void)
 	profile_frame_last = 0.0;
 	profile_total_wpoly = 0;
 	profile_total_epoly = 0;
+}
+
+/*
+====================
+CL_PlayProfile_f
+
+playprofile [demoname]
+Like timedemo but takes a screenshot every 100 net frames
+====================
+*/
+void CL_PlayProfile_f (void)
+{
+	if (cmd_source != src_command)
+		return;
+
+	if (Cmd_Argc() != 2)
+	{
+		Con_Printf ("playprofile <demoname> : plays demo fast, screenshots every 100 frames\n");
+		return;
+	}
+
+	CL_PlayDemo_f ();
+
+	cls.timedemo = true;
+	cls.playprofile = true;
+	cls.pp_framecount = 0;
+	cls.pp_shotcount = 0;
+	cls.td_startframe = host_framecount;
+	cls.td_lastframe = -1;
 }
 

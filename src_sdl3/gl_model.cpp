@@ -25,14 +25,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // DEFINE MODEL, DAMNIT!!
 
 #include "quakedef.h"
-#include "gl_mirror.h"
 
 extern qboolean external_textures;
 
 model_t	*loadmodel;
 char	loadname[32];	// for hunk tags
 
-void Mod_LoadQ2AliasModel (model_t *mod, void *buffer); // Tomaz - Quake2 Models
 void Mod_LoadSpriteModel (model_t *mod, void *buffer);
 void Mod_LoadBrushModel (model_t *mod, void *buffer);
 void Mod_LoadAliasModel (model_t *mod, void *buffer);
@@ -329,12 +327,6 @@ model_t *Mod_LoadModel (model_t *mod, qboolean crash)
 		Mod_LoadAliasModel (mod, buf);
 		break;
 
-	// Tomaz - Quake2 Models Begin
-	case MD2IDALIASHEADER:
-		Mod_LoadQ2AliasModel (mod, buf);
-		break;		
-	// Tomaz - Quake2 Models End
-
 	case IDSPRITEHEADER:
 		Mod_LoadSpriteModel (mod, buf);
 		break;
@@ -371,7 +363,6 @@ model_t *Mod_ForName (char *name, qboolean crash)
 
 ===============================================================================
 */
-int GetRSForName(char name[56]);
 byte	*mod_base;
 
 /*
@@ -435,8 +426,6 @@ void Mod_LoadQ1Textures (lump_t *l)
 		tx->height = mt->height;
 		for (j=0 ; j<MIPLEVELS ; j++)
 			tx->offsets[j] = 0;
-
-		tx->rs			= GetRSForName(mt->name);
 
 		_snprintf (texname, sizeof(texname),"textures/%s", tx->name);
 
@@ -693,8 +682,6 @@ void Mod_LoadHLTextures (lump_t *l)
 		tx->height = mt->height;
 		for (j=0 ; j<MIPLEVELS ; j++)
 			tx->offsets[j] = 0;
-
-		tx->rs			= GetRSForName(mt->name);
 
 		_snprintf (texname, sizeof(texname), "textures/%s", tx->name);
 
@@ -1223,14 +1210,6 @@ void Mod_LoadFaces (lump_t *l)
 			GL_SubdivideSurface (out);	// cut up polygon for warps
 			continue;
 		}
-
-// FIXME: support for iD mirrors, remove this and do this correct with rscript
-		if (!strncmp (out->texinfo->texture->name, "window02_1", 10))
-		{
-			out->flags |= SURF_MIRROR;
-			continue;
-		}
-// END
 
 		if (out->texinfo->texture->name[0] == '*'	||	// turbulent
 			out->texinfo->texture->name[0] == '!')

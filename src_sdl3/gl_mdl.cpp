@@ -22,6 +22,30 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 
 #include "quakedef.h"
+#include "gl_render.h"
+
+// Streaming VBO + staging buffer shared by all alias draws.
+typedef struct {
+	float x, y, z;
+	float s, t;
+	unsigned char r, g, b, a;
+} alias_vtx_t;
+
+#define ALIAS_MAX_VERTS 65536
+static alias_vtx_t alias_soup[ALIAS_MAX_VERTS];
+static DynamicVBO  alias_vbo;
+static qboolean    alias_vbo_ready = false;
+
+static void Alias_EnsureVBO(void)
+{
+	if (alias_vbo_ready) return;
+	if (!R_EnsureAliasShader()) return;
+	DynamicVBO_Init(&alias_vbo, sizeof(alias_soup));
+	DynamicVBO_SetAttrib(&alias_vbo, 0, 3, GL_FLOAT,         GL_FALSE, sizeof(alias_vtx_t), offsetof(alias_vtx_t, x));
+	DynamicVBO_SetAttrib(&alias_vbo, 1, 2, GL_FLOAT,         GL_FALSE, sizeof(alias_vtx_t), offsetof(alias_vtx_t, s));
+	DynamicVBO_SetAttrib(&alias_vbo, 2, 4, GL_UNSIGNED_BYTE, GL_TRUE,  sizeof(alias_vtx_t), offsetof(alias_vtx_t, r));
+	alias_vbo_ready = true;
+}
 
 stvert_t	stverts[MAXALIASVERTS];
 trivertx_t	*poseverts[MAXALIASFRAMES];
@@ -777,7 +801,6 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	pheader->numposes = posenum;
 
 	mod->type = mod_alias;
-	mod->aliastype = ALIASTYPE_MDL;
 
 	for (i = 0; i < 3; i++)
 	{
@@ -912,181 +935,119 @@ void GL_DrawAliasBlendedFrame (int frame, aliashdr_t *paliashdr, entity_t* e)
 
 	order = (int *)((byte *)paliashdr + paliashdr->commands);
 
+	Alias_EnsureVBO();
+	if (!alias_vbo_ready)
+		return;
+
+	// Traverse the command list, computing lerp + lighting per vertex on the
+	// CPU, then re-triangulating fans and strips into a single triangle soup.
+	int nverts = 0;
+	unsigned char eA = (unsigned char)(e->alpha * 255.0f + 0.5f);
+
+	// scratch per-strip/fan buffers
+	static alias_vtx_t strip[256];
 
 	for (;;)
 	{
-		// get the vertex count and primitive type
 		count = *order++;
-        
-		if (!count) 
-			break;
-		if (count < 0)
+		if (!count) break;
+
+		qboolean is_fan = (count < 0);
+		if (is_fan) count = -count;
+		if (count > 256) count = 256;
+
+		for (int i = 0; i < count; ++i)
 		{
-			count = -count;
-			glBegin (GL_TRIANGLE_FAN);
-		}
-		else
-		{
-			glBegin (GL_TRIANGLE_STRIP);
-		}
-		do
-		{
+			float s_tc = ((float *)order)[0];
+			float t_tc = ((float *)order)[1];
+			order += 2;
+
+			// Blend positions between poses.
+			VectorSubtract(verts2->v, verts1->v, d);
+			float px = verts1->v[0] + blend * d[0];
+			float py = verts1->v[1] + blend * d[1];
+			float pz = verts1->v[2] + blend * d[2];
+
+			unsigned char cr, cg, cb;
 			if (!e->model->fullbright)
 			{
 				float d2, l1, l2, diff;
 				d[0] = shadedots_mdl[verts2->lightnormalindex] - shadedots_mdl[verts1->lightnormalindex];
-				d2 = shadedots2_mdl[verts2->lightnormalindex] - shadedots2_mdl[verts1->lightnormalindex];
-				l1 = shadedots_mdl[verts1->lightnormalindex] + (blend * d[0]);
-				l2 = shadedots2_mdl[verts1->lightnormalindex] + (blend * d2);
-				if (l1 != l2)
-				{
-					if (l1 > l2) {
-						diff = l1 - l2;
-						diff *= lightlerpoffset;
-						l = l1 - diff;
-					} else {
-						diff = l2 - l1;
-						diff *= lightlerpoffset;
-						l = l1 + diff;
-					}
-				}
-				else
-				{
+				d2   = shadedots2_mdl[verts2->lightnormalindex] - shadedots2_mdl[verts1->lightnormalindex];
+				l1 = shadedots_mdl[verts1->lightnormalindex]  + blend * d[0];
+				l2 = shadedots2_mdl[verts1->lightnormalindex] + blend * d2;
+				if (l1 != l2) {
+					if (l1 > l2) { diff = (l1 - l2) * lightlerpoffset; l = l1 - diff; }
+					else         { diff = (l2 - l1) * lightlerpoffset; l = l1 + diff; }
+				} else {
 					l = l1;
 				}
-
-				glColor4f (l * lightcolor[0], l * lightcolor[1], l * lightcolor[2], e->alpha);	// Tomaz - QC Alpha
+				float fr = l * lightcolor[0];
+				float fg = l * lightcolor[1];
+				float fb = l * lightcolor[2];
+				if (fr > 1.0f) fr = 1.0f;
+				if (fg > 1.0f) fg = 1.0f;
+				if (fb > 1.0f) fb = 1.0f;
+				cr = (unsigned char)(fr * 255.0f + 0.5f);
+				cg = (unsigned char)(fg * 255.0f + 0.5f);
+				cb = (unsigned char)(fb * 255.0f + 0.5f);
 			}
-			else {
-				glColor4f (1, 1, 1, e->alpha);	// Tomaz - QC Alpha
+			else
+			{
+				cr = cg = cb = 255;
 			}
 
-			// texture coordinates come from the draw list
-			glTexCoord2f (((float *)order)[0], ((float *)order)[1]);
-			order += 2;
-
-			// normals and vertexes come from the frame list
-			VectorSubtract(verts2->v, verts1->v, d);
-
-			// blend the vertex positions from each frame together
-			glVertex3f (
-						verts1->v[0] + (blend * d[0]),
-						verts1->v[1] + (blend * d[1]),
-						verts1->v[2] + (blend * d[2]));
+			strip[i] = { px, py, pz, s_tc, t_tc, cr, cg, cb, eA };
 
 			verts1++;
 			verts2++;
-		} 
-		while 
-			(--count);
-		glEnd ();
+		}
 
-	}
-	glColor4f (1,1,1,1);
-}
-
-/*
-=============
-GL_DrawAliasBlendedShadow
-=============
-*/
-void GL_DrawAliasBlendedShadow (aliashdr_t *paliashdr, int pose1, int pose2, entity_t* e)
-{
-	trivertx_t* verts1;
-	trivertx_t* verts2;
-	int*        order;
-	vec3_t      point1;
-	vec3_t      point2;
-	vec3_t      d;
-	float       height;
-	float       lheight;
-	int         count;
-	float       blend;
-
-	// Tomaz - New Shadow Begin
-	trace_t		downtrace;
-	vec3_t		downmove;
-	float		s1,c1;
-	// Tomaz - New Shadow End
-
-	blend = (realtime - e->frame_start_time) / e->frame_interval;
-
-	if (blend > 1) blend = 1;
-
-	lheight = e->origin[2] - lightspot[2];
-	height  = -lheight; // Tomaz - New Shadow
-
-	// Tomaz - New Shadow Begin
-	if (!cl.worldmodel) return;
-	VectorCopy (e->origin, downmove);
-	downmove[2] = downmove[2] - 4096;
-	memset (&downtrace, 0, sizeof(downtrace));
-	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0, 1, e->origin, downmove, &downtrace);
-
-	s1 = sin( e->angles[1]/180*M_PI);
-	c1 = cos( e->angles[1]/180*M_PI);
-	// Tomaz - New Shadow End
-
-	verts1 = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
-	verts2 = verts1;
-
-	verts1 += pose1 * paliashdr->poseverts;
-	verts2 += pose2 * paliashdr->poseverts;
-
-	order = (int *)((byte *)paliashdr + paliashdr->commands);
-
-	for (;;)
-	{
-		// get the vertex count and primitive type
-		count = *order++;
-
-		if (!count) break;
-
-		if (count < 0)
+		// Re-triangulate strip or fan into triangle soup.
+		if (is_fan)
 		{
-			count = -count;
-			glBegin (GL_TRIANGLE_FAN);
+			for (int i = 1; i < count - 1; ++i)
+			{
+				if (nverts + 3 > ALIAS_MAX_VERTS) goto flush;
+				alias_soup[nverts++] = strip[0];
+				alias_soup[nverts++] = strip[i];
+				alias_soup[nverts++] = strip[i + 1];
+			}
 		}
 		else
 		{
-			glBegin (GL_TRIANGLE_STRIP);
+			for (int i = 0; i < count - 2; ++i)
+			{
+				if (nverts + 3 > ALIAS_MAX_VERTS) goto flush;
+				if (i & 1) {
+					alias_soup[nverts++] = strip[i + 1];
+					alias_soup[nverts++] = strip[i];
+					alias_soup[nverts++] = strip[i + 2];
+				} else {
+					alias_soup[nverts++] = strip[i];
+					alias_soup[nverts++] = strip[i + 1];
+					alias_soup[nverts++] = strip[i + 2];
+				}
+			}
 		}
+	}
 
-		do
-		{
-			order += 2;
+flush:
+	if (nverts == 0)
+		return;
 
-			point1[0] = verts1->v[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
-			point1[1] = verts1->v[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
-			point1[2] = verts1->v[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+	float mvp[16];
+	R_CurrentMVP(mvp);
 
-			point2[0] = verts2->v[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
-			point2[1] = verts2->v[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
-			point2[2] = verts2->v[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+	GLShader_Use(&R_AliasShader);
+	glUniformMatrix4fv(R_AliasShader_u_mvp, 1, GL_FALSE, mvp);
+	glUniform1i       (R_AliasShader_u_tex, 0);
 
-			VectorSubtract(point2, point1, d);
+	DynamicVBO_Upload(&alias_vbo, alias_soup, (GLsizei)(nverts * sizeof(alias_vtx_t)));
+	DynamicVBO_Bind(&alias_vbo);
+	glDrawArrays(GL_TRIANGLES, 0, nverts);
 
-			// Tomaz - New shadow Begin
-			point1[0] = point1[0] + (blend * d[0]);
-			point1[1] = point1[1] + (blend * d[1]);
-			point1[2] = point1[2] + (blend * d[2]);
-
-			point1[2] =  - (e->origin[2] - downtrace.endpos[2]);
-
-			point1[2] += ((point1[1] * (s1 * downtrace.plane.normal[0])) -
-						  (point1[0] * (c1 * downtrace.plane.normal[0])) -
-						  (point1[0] * (s1 * downtrace.plane.normal[1])) - 
-						  (point1[1] * (c1 * downtrace.plane.normal[1]))) +  
-						  ((1.0 - downtrace.plane.normal[2])*20) + 0.2 ;
-
-			glVertex3fv (point1);
-			// Tomaz - New shadow Begin
-
-			verts1++;
-			verts2++;
-		} 
-		while 
-			(--count);
-		glEnd ();
-	}       
+	glBindVertexArray(0);
+	glUseProgram(0);
+	glColor4f (1,1,1,1);
 }

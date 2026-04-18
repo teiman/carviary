@@ -89,7 +89,7 @@ typedef struct
 	vec3_t	start, end;
 } beam_t;
 
-#define	MAX_EFRAGS		640
+#define	MAX_EFRAGS		32768
 
 #define	MAX_MAPSTRING	2048
 #define	MAX_DEMOS		8
@@ -123,6 +123,9 @@ typedef struct
 	qboolean	demoplayback;
 	qboolean	timedemo;
 	qboolean	profile;			// like timedemo but writes JSON and auto-quits
+	qboolean	playprofile;		// like timedemo but takes screenshot every 100 net frames
+	int			pp_framecount;		// net frames since playprofile started
+	int			pp_shotcount;		// screenshots taken during playprofile
 	int			forcetrack;			// -1 = use normal cd track
 	FILE		*demofile;
 	int			td_lastframe;		// to meter out one message a frame
@@ -345,6 +348,7 @@ void CL_Record_f (void);
 void CL_PlayDemo_f (void);
 void CL_TimeDemo_f (void);
 void CL_Profile_f (void);
+void CL_PlayProfile_f (void);
 
 //
 // cl_parse.c

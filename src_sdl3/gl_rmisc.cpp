@@ -20,7 +20,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
-#include "gl_mirror.h"
 
 void R_InitParticles (void);
 void R_ClearParticles ();
@@ -87,10 +86,8 @@ void R_Init (void)
 
 	Cvar_RegisterVariable (&r_norefresh);
 	Cvar_RegisterVariable (&r_drawviewmodel);
-	Cvar_RegisterVariable (&r_shadows);
 	Cvar_RegisterVariable (&r_wateralpha);
 	Cvar_RegisterVariable (&r_dynamic);
-	Cvar_RegisterVariable (&r_mirroralpha);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_speeds);
 	Cvar_RegisterVariable (&gl_finish);
@@ -112,15 +109,11 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_wave);		// Tomaz - Water Wave
 	Cvar_RegisterVariable (&gl_glows);		// Tomaz - Glow
 	Cvar_RegisterVariable (&r_bobbing);		// Tomaz - Bobbing Items
-	Cvar_RegisterVariable (&gl_envmap);		// Tomaz - Enviroment Mapping
 	Cvar_RegisterVariable (&gl_caustics);	// Tomaz - Underwater Caustics
 	Cvar_RegisterVariable (&gl_fbr);		// Tomaz - Fullbrights
 	Cvar_RegisterVariable (&impaim);		// Tomaz - Improved Aiming
 	Cvar_RegisterVariable (&skybox_spin);	// Tomaz - Spinning Skyboxes
 	Cvar_RegisterVariable (&mapshots);		// Tomaz - MapShots
-	Cvar_RegisterVariable (&gl_showpolys);	// Tomaz - Show BSP Polygons
-	Cvar_RegisterVariable (&gl_wireframe);	// Tomaz - Draw World as Wireframe and Textures
-	Cvar_RegisterVariable (&gl_wireonly);	// Tomaz - Draw World as Wireframe Only
 	Cvar_RegisterVariable (&gl_particles);	// Tomaz - Particles
 	Cvar_RegisterVariable (&print_center_to_console);	// Tomaz - Prints CenterString's to the console
 	Cvar_RegisterVariable (&gl_particle_fire);	// Tomaz - Fire Particles
@@ -162,9 +155,6 @@ void R_TranslatePlayerSkin (int playernum)
 
 	if (model->type != mod_alias)
 		return; // only translate skins on alias models
-
-	if (model->aliastype != ALIASTYPE_MDL) 
-		return; // only translate skins on .mdl models 
 
 	top = cl.scores[playernum].colors & 0xf0;
 	bottom = (cl.scores[playernum].colors &15)<<4;

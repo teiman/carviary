@@ -172,13 +172,10 @@ void SV_StartSound (edict_t *entity, int channel, char *sample, int volume,
 	if (attenuation != DEFAULT_SOUND_PACKET_ATTENUATION)
 		field_mask |= SND_ATTENUATION;
 
-	if (sv.protocol == PROTOCOL_RMQ)
-	{
-		if (ent >= 8192 || channel >= 8)
-			field_mask |= SND_LARGEENTITY;
-		if (sound_num >= 256)
-			field_mask |= SND_LARGESOUND;
-	}
+	if (ent >= 8192 || channel >= 8)
+		field_mask |= SND_LARGEENTITY;
+	if (sound_num >= 256)
+		field_mask |= SND_LARGESOUND;
 
 // directed messages go only to the entity the are targeted on
 	MSG_WriteByte (&sv.datagram, svc_sound);

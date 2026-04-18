@@ -328,8 +328,12 @@ void VID_Init (unsigned char *palette)
 	currentHeight = height;
 
 	// ----- SDL GL attributes -----
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+	// Request GL 3.3 compatibility profile during the GL 1.x -> 3.3 core migration.
+	// Compatibility keeps legacy fixed-function working while we port file-by-file;
+	// switch to CORE once no GL 1.x calls remain.
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
@@ -351,6 +355,13 @@ void VID_Init (unsigned char *palette)
 		Sys_Error("Couldn't create GL context: %s", SDL_GetError());
 
 	SDL_GL_MakeCurrent(sdl_window, sdl_glcontext);
+
+	// Load GL function pointers via GLAD
+	if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress))
+		Sys_Error("Failed to load OpenGL via GLAD");
+
+	if (!GLAD_GL_VERSION_3_3)
+		Sys_Error("OpenGL 3.3 not available on this system");
 
 	// enable vsync (swap interval 1); ignore failure
 	SDL_GL_SetSwapInterval(1);

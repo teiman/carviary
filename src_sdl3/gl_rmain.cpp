@@ -20,14 +20,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
-#include "gl_mirror.h" // add mh's mirror header file
+#include "gl_render.h"
 
 // precalculated dot products for quantized angles
 extern float	r_avertexnormal_dots_mdl[16][256];
-extern float	r_avertexnormal_dots_md2[16][256];
 
 extern float	*shadedots_mdl, *shadedots2_mdl;
-extern float	*shadedots_md2, *shadedots2_md2;
 
 float   lightlerpoffset;
 
@@ -63,8 +61,6 @@ texture_t	*r_notexture_mip;
 
 void	GL_DrawAliasBlendedFrame (int frame, aliashdr_t *paliashdr, entity_t* e);
 void	GL_DrawAliasBlendedFrame2 (int frame, aliashdr_t *paliashdr, entity_t* e);
-void	R_SetupQ2AliasFrame (int frame, md2_t *pheader, entity_t *e);
-void	GL_DrawAliasBlendedShadow (aliashdr_t *paliashdr, int pose1, int pose2, entity_t* e);
 void	R_SetupBrushPolys (entity_t *e);
 void	R_AnimateLight (void);
 void	V_CalcBlend (void);
@@ -79,7 +75,6 @@ void	R_DrawGlows(entity_t *e);
 cvar_t	r_norefresh			= {"r_norefresh","0"};
 cvar_t	r_drawviewmodel		= {"r_drawviewmodel","1"};
 cvar_t	r_speeds			= {"r_speeds","0"};
-cvar_t	r_shadows			= {"r_shadows","0", true};
 cvar_t	r_wateralpha		= {"r_wateralpha","1", true};
 cvar_t	r_dynamic			= {"r_dynamic","1"};
 cvar_t	r_novis				= {"r_novis","0"};
@@ -100,15 +95,11 @@ cvar_t	con_alpha			= {"con_alpha", "0.5", true};	// Tomaz - Console Alpha
 cvar_t	r_wave				= {"r_wave", "0", true};		// Tomaz - Water Wave
 cvar_t	gl_glows			= {"gl_glows", "1", true};		// Tomaz - Glow
 cvar_t	r_bobbing			= {"r_bobbing", "1", true};		// Tomaz - Bobbing Items
-cvar_t	gl_envmap			= {"gl_envmap", "0", true};		// Tomaz - Enviroment Mapping
 cvar_t	gl_caustics			= {"gl_caustics", "0", true};	// Tomaz - Underwater Caustics
 cvar_t	gl_fbr				= {"gl_fbr", "1", true};		// Tomaz - Fullbrights
 cvar_t	impaim				= {"impaim", "1", true};		// Tomaz - Improved Aiming
 cvar_t	skybox_spin			= {"skybox_spin", "0", true};	// Tomaz - Spinning Skyboxes
 cvar_t	mapshots			= {"mapshots", "1", true};		// Tomaz - MapShots
-cvar_t	gl_showpolys		= {"gl_showpolys", "0"};		// Tomaz - Show BSP Polygons
-cvar_t	gl_wireframe		= {"gl_wireframe", "0"};		// Tomaz - Draw World as Wireframe and Textures
-cvar_t	gl_wireonly			= {"gl_wireonly", "0"};			// Tomaz - Draw World as Wireframe Only
 cvar_t	gl_particles		= {"gl_particles", "1", true};	// Tomaz - Particles
 cvar_t	print_center_to_console		= {"print_center_to_console", "0", true};		// Tomaz - Prints CenerString's to the console
 cvar_t	gl_particle_fire	= {"gl_particle_fire", "0", true};		// Tomaz - Fire Particles (disabled: requires TomazQuake assets)
@@ -270,7 +261,6 @@ void R_DrawAliasModel (entity_t *e, int cull)
 {
 	int			i, lnum, anim;
 	float		add;
-	md2_t		*pheader; // Tomaz - Quake2 Models
 	vec3_t		dist, mins, maxs;
 	model_t		*clmodel;
 	aliashdr_t	*paliashdr;
@@ -289,7 +279,7 @@ void R_DrawAliasModel (entity_t *e, int cull)
 	{
 		R_Fire(currententity, true);
 		return;
-	}	
+	}
 
 	if (cull && R_CullBox (mins, maxs))
 		return;
@@ -305,10 +295,6 @@ void R_DrawAliasModel (entity_t *e, int cull)
 	{
 		float ang_ceil, ang_floor;
 
-		//
-		// get lighting information
-		//
-
 		R_LightPoint(currententity->origin); // Tomaz - Lit Support
 
 		for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
@@ -320,14 +306,12 @@ void R_DrawAliasModel (entity_t *e, int cull)
 								dist);
 				add = cl_dlights[lnum].radius - Length(dist);
 
-				// Tomaz - Lit Support Begin
 				if (add > 0)
 				{
 					lightcolor[0] += add * cl_dlights[lnum].color[0];
 					lightcolor[1] += add * cl_dlights[lnum].color[1];
 					lightcolor[2] += add * cl_dlights[lnum].color[2];
 				}
-				// Tomaz - Lit Support End
 			}
 		}
 
@@ -339,21 +323,17 @@ void R_DrawAliasModel (entity_t *e, int cull)
 		lightlerpoffset = ang_ceil - lightlerpoffset;
 
 		shadedots_mdl	= r_avertexnormal_dots_mdl[(int)ang_ceil & (16 - 1)];
-		shadedots_md2	= r_avertexnormal_dots_md2[(int)ang_ceil & (16 - 1)];
 		shadedots2_mdl	= r_avertexnormal_dots_mdl[(int)ang_floor & (16 - 1)];
-		shadedots2_md2	= r_avertexnormal_dots_md2[(int)ang_floor & (16 - 1)];
 
-		// Tomaz - Lit Support Begin
 		lightcolor[0] = lightcolor[0] * 0.005;
 		lightcolor[1] = lightcolor[1] * 0.005;
 		lightcolor[2] = lightcolor[2] * 0.005;
-		// Tomaz - Lit Support End
 
 		if (!lightcolor[0] && !lightcolor[1] && !lightcolor[2])
 		{
 			VectorCopy  (lightcolor, currententity->last_light);
 		}
-		else 
+		else
 		{
 			VectorAdd   (lightcolor, currententity->last_light, lightcolor);
 			VectorScale (lightcolor, 0.5f, lightcolor);
@@ -361,120 +341,59 @@ void R_DrawAliasModel (entity_t *e, int cull)
 		}
 	}
 
-	//
-	// locate the proper data
-	//
-	if (clmodel->aliastype == ALIASTYPE_MDL)
-	{
-		paliashdr = (aliashdr_t *)Mod_Extradata (currententity->model);
-		c_alias_polys += paliashdr->numtris;
-	}
-	else
-	{
-		pheader = (md2_t *)Mod_Extradata (currententity->model);
-		c_alias_polys += pheader->num_tris;
-	}
-
-	//
-	// draw all the triangles
-	//
+	paliashdr = (aliashdr_t *)Mod_Extradata (currententity->model);
+	c_alias_polys += paliashdr->numtris;
 
 	glPushMatrix ();
 
-	// prevent viemodels from messing up
+	// prevent viewmodels from messing up
 	if (!weaponmodel)
-	{
-		R_BlendedRotateForEntity (e, 0);	
-	}
+		R_BlendedRotateForEntity (e, 0);
 	else
-	{
 		R_RotateForEntity (e, 0);
-	}
 
-	if (clmodel->aliastype == ALIASTYPE_MDL)
+	if (!strcmp (clmodel->name, "progs/eyes.mdl") && gl_doubleeyes.value)
 	{
-		if (!strcmp (clmodel->name, "progs/eyes.mdl") && gl_doubleeyes.value) 
-		{
-			glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2] - (22 + 8));
-			// double size of eyes, since they are really hard to see in gl
-			glScalef (paliashdr->scale[0]*2, paliashdr->scale[1]*2, paliashdr->scale[2]*2);
-		}
-		else
-		{
-			glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2]);
-			glScalef (paliashdr->scale[0], paliashdr->scale[1], paliashdr->scale[2]);
-		}
-
-		anim = (int)(cl.time*10) & 3;
-	
-	    glBindTexture (GL_TEXTURE_2D, paliashdr->gl_texturenum[currententity->skinnum][anim]);
-		glTexEnvf (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
-		// we can't dynamically colormap textures, so they are cached
-		// seperately for the players.  Heads are just uncolored.
-		if (currententity->colormap != vid.colormap && !gl_nocolors.value)
-		{
-			i = currententity - cl_entities;
-			if (i >= 1 && i<=cl.maxclients /* && !strcmp (currententity->model->name, "progs/player.mdl") */)
-				glBindTexture (GL_TEXTURE_2D, playertextures - 1 + i);
-		}
-
-		GL_DrawAliasBlendedFrame (currententity->frame, paliashdr, currententity);	
-
-		glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-
-		if (paliashdr->fb_texturenum[currententity->skinnum][anim] && gl_fbr.value)
-		{
-			glBindTexture (GL_TEXTURE_2D, paliashdr->fb_texturenum[currententity->skinnum][anim]);
-			GL_DrawAliasBlendedFrame (currententity->frame, paliashdr, currententity);
-		}
-
-		glPopMatrix ();		
-
-		// Glow flare begin - see gl_flares.c for more info
-		if (gl_glows.value)
-		{
-			if (clmodel->glow_radius)
-				R_DrawGlows(currententity);
-		}	
-
-		if (r_shadows.value && cl.worldmodel)
-		{
-			if (!clmodel->noshadow)
-			{
-				// Tomaz - New Shadow Begin
-				trace_t		downtrace;
-				vec3_t		downmove;
-				// Tomaz - New Shadow End
-
-				glPushMatrix ();
-
-				R_BlendedRotateForEntity (e, 1);
-
-				VectorCopy (e->origin, downmove);
-
-				downmove[2] = downmove[2] - 4096;
-				memset (&downtrace, 0, sizeof(downtrace));
-				SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0, 1, e->origin, downmove, &downtrace);
-
-				glDisable (GL_TEXTURE_2D);
-				glDepthMask(false); // disable zbuffer updates
-				glColor4f (0,0,0,(currententity->alpha - ((mins[2]-downtrace.endpos[2])/60)));
-				GL_DrawAliasBlendedShadow (paliashdr, lastposenum0, lastposenum, currententity);
-				glDepthMask(true); // disable zbuffer updates
-				glEnable (GL_TEXTURE_2D);
-				glColor4f (1,1,1,1);
-				glPopMatrix ();
-			}
-		}
+		glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2] - (22 + 8));
+		// double size of eyes, since they are really hard to see in gl
+		glScalef (paliashdr->scale[0]*2, paliashdr->scale[1]*2, paliashdr->scale[2]*2);
 	}
 	else
 	{
-	    glBindTexture (GL_TEXTURE_2D, pheader->gl_texturenum[currententity->skinnum]);
-		R_SetupQ2AliasFrame (currententity->frame, pheader, currententity);
+		glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2]);
+		glScalef (paliashdr->scale[0], paliashdr->scale[1], paliashdr->scale[2]);
 	}
 
-	glPopMatrix ();	
+	anim = (int)(cl.time*10) & 3;
+
+	glActiveTexture (GL_TEXTURE0);
+	glBindTexture (GL_TEXTURE_2D, paliashdr->gl_texturenum[currententity->skinnum][anim]);
+
+	// we can't dynamically colormap textures, so they are cached
+	// seperately for the players.  Heads are just uncolored.
+	if (currententity->colormap != vid.colormap && !gl_nocolors.value)
+	{
+		i = currententity - cl_entities;
+		if (i >= 1 && i<=cl.maxclients)
+			glBindTexture (GL_TEXTURE_2D, playertextures - 1 + i);
+	}
+
+	GL_DrawAliasBlendedFrame (currententity->frame, paliashdr, currententity);
+
+	if (paliashdr->fb_texturenum[currententity->skinnum][anim] && gl_fbr.value)
+	{
+		glBindTexture (GL_TEXTURE_2D, paliashdr->fb_texturenum[currententity->skinnum][anim]);
+		GL_DrawAliasBlendedFrame (currententity->frame, paliashdr, currententity);
+	}
+
+	glPopMatrix ();
+
+	// Glow flare begin - see gl_flares.c for more info
+	if (gl_glows.value)
+	{
+		if (clmodel->glow_radius)
+			R_DrawGlows(currententity);
+	}
 }
 //==================================================================================
 
@@ -508,8 +427,6 @@ void R_SetupTransEntities (void)
 		currententity->solid = false;
 	}
 }
-
-qboolean wireframe;
 
 /*
 =============
@@ -565,18 +482,8 @@ transgetent:
 		R_DrawAliasModel  (currententity, true);
 		break;
 	case mod_brush:
-		{
-			R_SetupBrushPolys (currententity);
-			if (gl_wireframe.value)
-			{
-				wireframe = true;
-				glDisable (GL_DEPTH_TEST);
-				R_SetupBrushPolys (currententity);
-				glEnable (GL_DEPTH_TEST);
-				wireframe = false;
-			}
-			break;
-		}
+		R_SetupBrushPolys (currententity);
+		break;
 	case mod_sprite:
 		R_DrawSpriteModel (currententity);
 		break;
@@ -640,69 +547,98 @@ extern cvar_t brightness; // muff
 // re-worked + extended - muff 5 Feb 2001
 // called inside polyblend
 
-void DoGamma(void)
-{
-	if (brightness.value < 0.2f)
-		brightness.value = 0.2f;
-	if (brightness.value >= 1)
-	{
-		brightness.value = 1;
-		return;
-	}
-
-	// believe it or not this actually does brighten the picture!!
-	glBlendFunc (GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-	glColor4f (1, 1, 1, brightness.value);
-	glBegin (GL_QUADS);
-	glVertex3f (10, 100, 100);
-	glVertex3f (10, -100, 100);
-	glVertex3f (10, -100, -100);
-	glVertex3f (10, 100, -100);
-	
-	// if we do this twice, we double the brightening effect for a wider range of gamma's
-	glVertex3f (11, 100, 100);
-	glVertex3f (11, -100, 100);
-	glVertex3f (11, -100, -100);
-	glVertex3f (11, 100, -100);
-	glEnd ();
-}
-
 /*
 ============
 R_PolyBlend
+
+Screen-space overlays: damage/pickup tint (v_blend) and brightness gamma.
+Both are full-viewport quads blended over the already-rendered scene.
+Uses a clip-space [-1,+1] quad directly so we never depend on the caller's
+view matrix (R_HudFill would pull in the 3D MVP via R_CurrentMVP).
 ============
 */
+static GLuint polyblend_vao = 0;
+static GLuint polyblend_vbo = 0;
+
+static void R_InitPolyBlendVBO(void)
+{
+	if (polyblend_vao) return;
+
+	// Two triangles covering clip space [-1,+1].
+	const float verts[12] = {
+		-1, -1,
+		 1, -1,
+		 1,  1,
+		-1, -1,
+		 1,  1,
+		-1,  1,
+	};
+
+	glGenVertexArrays(1, &polyblend_vao);
+	glGenBuffers(1, &polyblend_vbo);
+	glBindVertexArray(polyblend_vao);
+	glBindBuffer(GL_ARRAY_BUFFER, polyblend_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
+	glBindVertexArray(0);
+}
+
 void R_PolyBlend (void)
 {
 	if (brightness.value == 1 && !v_blend[3])
 		return;
 
-	glDisable (GL_DEPTH_TEST);
-	glDisable (GL_TEXTURE_2D);
+	if (brightness.value < 0.2f) brightness.value = 0.2f;
+	if (brightness.value > 1.0f) brightness.value = 1.0f;
 
-	glLoadIdentity ();
-	glRotatef (-90,  1, 0, 0);    // put Z going up
-	glRotatef (90,  0, 0, 1);    // put Z going up
+	if (!R_EnsureFullscreenShader()) return;
+	R_InitPolyBlendVBO();
 
+	// Identity MVP: input positions are already clip-space.
+	float identity[16] = {
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, 1, 0,
+		0, 0, 0, 1,
+	};
+
+	GLboolean depth_was_on = glIsEnabled(GL_DEPTH_TEST);
+	GLboolean blend_was_on = glIsEnabled(GL_BLEND);
+	GLboolean cull_was_on  = glIsEnabled(GL_CULL_FACE);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);  // R_SetupGL flipped to GL_FRONT culling
+	glEnable(GL_BLEND);
+	glDepthRange(0.0, 1.0);
+
+	GLShader_Use(&R_FullscreenShader);
+	glUniformMatrix4fv(R_FullscreenShader_u_mvp, 1, GL_FALSE, identity);
+	glBindVertexArray(polyblend_vao);
+
+	// v_blend: per-frame damage flash / pickup tint.
 	if (v_blend[3])
 	{
-		glColor4fv (v_blend);
-		glBegin (GL_QUADS);
-		glVertex3f (10, 100, 100);
-		glVertex3f (10, -100, 100);
-		glVertex3f (10, -100, -100);
-		glVertex3f (10, 100, -100);
-		glEnd ();
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glUniform4f(R_FullscreenShader_u_color, v_blend[0], v_blend[1], v_blend[2], v_blend[3]);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
 
-	if (brightness.value != 1)
+	// Brightness gamma: multiply framebuffer by (1+brightness). Classic path
+	// drew two passes of a DST_COLOR-blended quad to widen the range.
+	if (brightness.value < 1.0f)
 	{
-		DoGamma();
-		glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glBlendFunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+		glUniform4f(R_FullscreenShader_u_color, 1.0f, 1.0f, 1.0f, brightness.value);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
 
-	glEnable (GL_TEXTURE_2D);
-	glEnable (GL_DEPTH_TEST);
+	glBindVertexArray(0);
+	glUseProgram(0);
+	if (!blend_was_on) glDisable(GL_BLEND);
+	if (depth_was_on)  glEnable(GL_DEPTH_TEST);
+	if (cull_was_on)   glEnable(GL_CULL_FACE);
 }
 
 
@@ -817,12 +753,7 @@ void R_SetupGL (void)
 	y = (vid.height-r_refdef.vrect.y) * glheight/vid.height;
 	y2 = (vid.height - (r_refdef.vrect.y + r_refdef.vrect.height)) * glheight/vid.height;
 
-	if (mirror)
-		Mirror_Scale ();
-	else 
-	{
-		glCullFace(GL_FRONT);
-	}
+	glCullFace(GL_FRONT);
 
 	// fudge around because of frac screen scale
 	if (x > 0)
@@ -877,21 +808,14 @@ R_Clear
 */
 void R_Clear (void)
 {
-	if (r_mirroralpha.value < 1.0)
-	{
-		Mirror_Clear ();
-	}
+	if (gl_clear.value)
+		glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	else
-	{
-		if (gl_clear.value || gl_wireonly.value)
-			glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		else
-			glClear (GL_DEPTH_BUFFER_BIT);
+		glClear (GL_DEPTH_BUFFER_BIT);
 
-		gldepthmin = 0;
-		gldepthmax = 1;
-		glDepthFunc (GL_LEQUAL);
-	}
+	gldepthmin = 0;
+	gldepthmax = 1;
+	glDepthFunc (GL_LEQUAL);
 
 	glDepthRange (gldepthmin, gldepthmax);
 }
@@ -938,8 +862,7 @@ void R_RenderScene (void)
 
 	R_SetupTransEntities ();
 
-	if (!mirror_render)
-		R_MoveParticles ();
+	R_MoveParticles ();
 
 	if (cl.cshifts[CSHIFT_CONTENTS].percent == 0)
 	{
@@ -996,19 +919,8 @@ void R_RenderView (void)
 		Host_Error ("R_RenderView: NULL worldmodel");
 	}
 
-	if (r_mirroralpha.value >= 1.0)
-		r_mirroralpha.value = 1.0;
-	else if (r_mirroralpha.value <= 0)
-		r_mirroralpha.value = 0;
-
-	mirror = false;
-	mirror_render = false;
-
 	R_Clear ();
 	R_RenderScene();
-
-	if (mirror)
-		R_Mirror ();
 
 	R_DrawViewModel ();
 	R_PolyBlend ();

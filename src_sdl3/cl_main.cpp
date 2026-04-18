@@ -777,5 +777,6 @@ void CL_Init (void)
 	Cmd_AddCommand ("playdemo", CL_PlayDemo_f);
 	Cmd_AddCommand ("timedemo", CL_TimeDemo_f);
 	Cmd_AddCommand ("profile", CL_Profile_f);
+	Cmd_AddCommand ("playprofile", CL_PlayProfile_f);
 }
 

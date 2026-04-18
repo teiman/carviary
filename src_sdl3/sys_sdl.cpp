@@ -21,6 +21,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // sys_sdl.cpp -- SDL3 system interface, replaces sys_win.cpp
 
+// windows.h must be included before GLAD (pulled in via quakedef.h/sdlquake.h)
+// to avoid APIENTRY/tagPOINT collisions.
+#ifdef _WIN32
+#include <direct.h>
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+#endif
+
 #include "quakedef.h"
 #include "sdlquake.h"
 
@@ -32,12 +41,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
-#ifdef _WIN32
-#include <direct.h>
-#include <windows.h>
-#include <dbghelp.h>
-#pragma comment(lib, "dbghelp.lib")
-#endif
 #include <time.h>
 
 // ===========================================================================

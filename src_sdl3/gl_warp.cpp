@@ -18,7 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 #include "quakedef.h"
-
+#include "gl_render.h"
 
 //
 // gl_warp.c -- sky and water polygons
@@ -51,8 +51,30 @@ float	turbsin[] =
 
 //
 // Define
-// 
+//
 #define TURBSCALE (40.7436589469704879)
+
+// Shared vertex format for warp/caustics draws.
+typedef struct {
+	float x, y, z;
+	float s, t;
+} warp_vtx_t;
+
+// Generous capacity: water surfaces get subdivided up to 64 unit grid,
+// generating many small polys per surface chain.
+#define WARP_MAX_VERTS 16384
+static warp_vtx_t warp_soup[WARP_MAX_VERTS];
+static DynamicVBO warp_vbo;
+static qboolean   warp_vbo_ready = false;
+
+static void Warp_EnsureVBO(void)
+{
+	if (warp_vbo_ready) return;
+	DynamicVBO_Init(&warp_vbo, sizeof(warp_soup));
+	DynamicVBO_SetAttrib(&warp_vbo, 0, 3, GL_FLOAT, GL_FALSE, sizeof(warp_vtx_t), offsetof(warp_vtx_t, x));
+	DynamicVBO_SetAttrib(&warp_vbo, 1, 2, GL_FLOAT, GL_FALSE, sizeof(warp_vtx_t), offsetof(warp_vtx_t, s));
+	warp_vbo_ready = true;
+}
 
 
 /*
@@ -214,97 +236,88 @@ Emit*****Polys - emits polygons with special effects
 =============
 EmitWaterPolys
 
-Does a water warp on the pre-fragmented glpoly_t chain
+Does a water warp on the pre-fragmented glpoly_t chain. Caller has already
+bound the diffuse texture. `alpha` comes from r_wateralpha at the call site.
+Warp is computed per-fragment by the `world_water` shader, so the motion
+stays smooth regardless of `gl_subdivide_size`.
 =============
 */
-void EmitWaterPolys (msurface_t *s)
+void EmitWaterPolys (msurface_t *s, float alpha)
 {
 	glpoly_t	*p;
 	float		*v;
 	int			i;
-	float		r, t, os, ot;
-	vec3_t		nv;
 
-	for (p=s->polys ; p ; p=p->next)
+	if (!R_EnsureWorldWaterShader()) return;
+	Warp_EnsureVBO();
+
+	static warp_vtx_t fan[256];
+	int n = 0;
+
+	for (p = s->polys; p; p = p->next)
 	{
-		glBegin (GL_POLYGON);
-		for (i=0,v=p->verts[0] ; i<p->numverts ; i++, v+=VERTEXSIZE)
+		int nv = p->numverts;
+		if (nv > 256) nv = 256;
+
+		v = p->verts[0];
+		for (i = 0; i < nv; ++i, v += VERTEXSIZE)
 		{
-			os = v[3];
-			ot = v[4];
-
-			r = os + turbsin[(int)((ot*0.125+realtime) * TURBSCALE) & 255];
-			r *= (0.015f);
-
-			t = ot + turbsin[(int)((os*0.125+realtime) * TURBSCALE) & 255];
-			t *= (0.015f);
-			
-			nv[0] = v[0];
-			nv[1] = v[1];
-			nv[2] = v[2];
+			fan[i].x = v[0];
+			fan[i].y = v[1];
+			fan[i].z = v[2];
 
 			if (r_wave.value)
-				nv[2] = v[2] + r_wave.value *sin(v[0]*0.02+realtime)*sin(v[1]*0.02+realtime)*sin(v[2]*0.02+realtime);
+				fan[i].z = v[2] + r_wave.value * sin(v[0]*0.02+realtime) * sin(v[1]*0.02+realtime) * sin(v[2]*0.02+realtime);
 
-			glTexCoord2f (r, t);
-			glVertex3fv (nv);
+			fan[i].s = v[3];
+			fan[i].t = v[4];
 		}
-		glEnd ();
-	}
-}
 
-/*
-=============
-EmitEnvMapPolys
-
-Enviroment Mapping
-=============
-*/
-
-void EmitEnvMapPolys (msurface_t *s)
-{
-	glpoly_t	*p;
-	float		*v;
-	int		i;
-	vec3_t		vert;
-
-	if (!gl_envmap.value)
-		return;
-
-	p = s->polys;
-
-
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glBindTexture (GL_TEXTURE_2D, shinytexture);
-	glBlendFunc(GL_ZERO, GL_SRC_COLOR);
-
-	for (p=s->polys ; p ; p=p->next)
-	{
-		glBegin (GL_POLYGON);
-
-		for (i=0,v=p->verts[0] ; i<p->numverts ; i++, v+=VERTEXSIZE)
+		for (int k = 1; k < nv - 1; ++k)
 		{
-			vert[0] = (v[0] * r_world_matrix[0]) + (v[1] * r_world_matrix[4]) + (v[2] * r_world_matrix[8] ) + r_world_matrix[12];
-			vert[1] = (v[0] * r_world_matrix[1]) + (v[1] * r_world_matrix[5]) + (v[2] * r_world_matrix[9] ) + r_world_matrix[13];
-			vert[2] = (v[0] * r_world_matrix[2]) + (v[1] * r_world_matrix[6]) + (v[2] * r_world_matrix[10]) + r_world_matrix[14];
-
-			VectorNormalize (vert);
-		
-			glTexCoord2f (vert[0], vert[1]);
-			glVertex3fv (v);
+			if (n + 3 > WARP_MAX_VERTS) goto flush;
+			warp_soup[n++] = fan[0];
+			warp_soup[n++] = fan[k];
+			warp_soup[n++] = fan[k + 1];
 		}
-
-		glEnd ();
 	}
 
-	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-	glColor4f(1,1,1,1);
+flush:
+	if (n == 0) return;
+
+	float mvp[16];
+	R_CurrentMVP(mvp);
+
+	GLboolean blend_was_on = glIsEnabled(GL_BLEND);
+	if (alpha < 1.0f) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
+
+	glActiveTexture(GL_TEXTURE0);
+	GLShader_Use(&R_WorldWaterShader);
+	glUniformMatrix4fv(R_WorldWaterShader_u_mvp, 1, GL_FALSE, mvp);
+	glUniform1i       (R_WorldWaterShader_u_tex, 0);
+	glUniform1f       (R_WorldWaterShader_u_time, (float)realtime);
+	glUniform1f       (R_WorldWaterShader_u_alpha, alpha);
+
+	DynamicVBO_Upload(&warp_vbo, warp_soup, (GLsizei)(n * sizeof(warp_vtx_t)));
+	DynamicVBO_Bind(&warp_vbo);
+	glDrawArrays(GL_TRIANGLES, 0, n);
+
+	if (!blend_was_on && alpha < 1.0f) glDisable(GL_BLEND);
+
+	glBindVertexArray(0);
+	glUseProgram(0);
 }
 
 /*
 =============
 EmitCausticsPolys
+
+Overlaid on underwater opaque surfaces: ZERO,SRC_COLOR multiplies the frame
+buffer by the caustic texture, brightening the pattern without washing out
+the original texture.
 =============
 */
 void EmitCausticsPolys (msurface_t *s)
@@ -313,24 +326,60 @@ void EmitCausticsPolys (msurface_t *s)
 	float		*v;
 	int			i, tn;
 
-	tn = (int)(host_time * 20)%31;
-	glBindTexture (GL_TEXTURE_2D, causticstexture[tn]);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glColor4f (1,1,1,0.3f);
-	glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+	if (!R_EnsureSpriteShader()) return;
+	Warp_EnsureVBO();
 
-	for (p=s->polys ; p ; p=p->next)
+	static warp_vtx_t fan[256];
+	int n = 0;
+
+	for (p = s->polys; p; p = p->next)
 	{
-		glBegin (GL_POLYGON);
-		for (i=0,v=p->verts[0] ; i<p->numverts ; i++, v+=VERTEXSIZE)
+		int nv = p->numverts;
+		if (nv > 256) nv = 256;
+
+		v = p->verts[0];
+		for (i = 0; i < nv; ++i, v += VERTEXSIZE)
 		{
-			glTexCoord2f (v[3], v[4]);
-			glVertex3fv (v);
+			fan[i].x = v[0]; fan[i].y = v[1]; fan[i].z = v[2];
+			fan[i].s = v[3]; fan[i].t = v[4];
 		}
-		glEnd ();
+
+		for (int k = 1; k < nv - 1; ++k)
+		{
+			if (n + 3 > WARP_MAX_VERTS) goto flush;
+			warp_soup[n++] = fan[0];
+			warp_soup[n++] = fan[k];
+			warp_soup[n++] = fan[k + 1];
+		}
 	}
 
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glColor4f (1,1,1,1);
+flush:
+	if (n == 0) return;
+
+	tn = (int)(host_time * 20) % 31;
+
+	float mvp[16];
+	R_CurrentMVP(mvp);
+
+	GLboolean blend_was_on = glIsEnabled(GL_BLEND);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, causticstexture[tn]);
+
+	GLShader_Use(&R_SpriteShader);
+	glUniformMatrix4fv(R_SpriteShader_u_mvp, 1, GL_FALSE, mvp);
+	glUniform4f       (R_SpriteShader_u_color, 1.0f, 1.0f, 1.0f, 0.3f);
+	glUniform1i       (R_SpriteShader_u_tex, 0);
+
+	DynamicVBO_Upload(&warp_vbo, warp_soup, (GLsizei)(n * sizeof(warp_vtx_t)));
+	DynamicVBO_Bind(&warp_vbo);
+	glDrawArrays(GL_TRIANGLES, 0, n);
+
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	if (!blend_was_on) glDisable(GL_BLEND);
+
+	glBindVertexArray(0);
+	glUseProgram(0);
 }

@@ -23,6 +23,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 
 #include "quakedef.h"
+#include "sdlquake.h"
+#include "gl_render.h"
+
+// GL 3.3 particle renderer state
+static DynamicVBO  part_vbo;
+static qboolean    part_shader_ok = false;
+
+// Vertex written per triangle corner. The quad is pre-built on CPU.
+typedef struct {
+	float x, y, z;
+	unsigned char r, g, b, a;
+} particle_vertex_t;
+
+#define MAX_PART_VERTS (16384 * 12)  // worst case: all particles on-screen, 12 verts each (4 tris)
+static particle_vertex_t part_verts[MAX_PART_VERTS];
+
+static void R_InitParticleShader(void);
 
 typedef enum	ptype_s		ptype_t;
 typedef struct	particle_s	particle_t;
@@ -226,7 +243,7 @@ void R_InitParticles (void)
 {
 	int		i = COM_CheckParm ("-particles");
 
-	r_numparticles = 4096;
+	r_numparticles = 16384;
 
 	if (i)
 	{
@@ -250,6 +267,29 @@ void R_InitParticles (void)
 	active_particles		= NULL;
 
 	R_InitParticleTexture ();
+	R_InitParticleShader ();
+}
+
+/*
+===============
+R_InitParticleShader
+
+Builds the `particle` program (GLSL 330) and a streaming VBO.
+Geometry is expanded on the CPU into textureless triangles with per-vertex
+alpha (center opaque, edges transparent) to produce the soft radial gradient.
+===============
+*/
+static void R_InitParticleShader (void)
+{
+	if (!R_EnsureParticleShader())
+		return;
+
+	DynamicVBO_Init(&part_vbo, sizeof(part_verts));
+	DynamicVBO_SetAttrib(&part_vbo, 0, 3, GL_FLOAT,         GL_FALSE, sizeof(particle_vertex_t), offsetof(particle_vertex_t, x));
+	DynamicVBO_SetAttrib(&part_vbo, 1, 4, GL_UNSIGNED_BYTE, GL_TRUE,  sizeof(particle_vertex_t), offsetof(particle_vertex_t, r));
+
+	part_shader_ok = true;
+	Con_Printf("Particle shader initialized\n");
 }
 
 /*
@@ -808,7 +848,8 @@ void R_RunParticleEffect (vec3_t origin, vec3_t direction, int color, int count)
 
 	if (count == 128)
 	{
-		for (i=0 ; i<count ; i++)
+		int expcount = (int)(count * 1.6); // AD-style: denser explosions
+		for (i=0 ; i<expcount ; i++)
 		{	// rocket explosion
 			p	= addParticle();
 			if(!p)
@@ -818,10 +859,10 @@ void R_RunParticleEffect (vec3_t origin, vec3_t direction, int color, int count)
 
 			contents			= Mod_PointInLeaf(p->origin, cl.worldmodel)->contents;
 
-			p->scale			= 2;
-			p->alpha			= 200;
-			p->die				= cl.time + 5;
-			
+			p->scale			= (rand() & 1) ? 0.8f : 1.6f; // small or medium
+			p->alpha			= 255;
+			p->die				= cl.time + 0.5f + (rand() & 15) * 0.05f;
+
 			if ((contents		== CONTENTS_EMPTY) ||
 				(contents		== CONTENTS_SOLID))
 			{
@@ -867,19 +908,19 @@ void R_RunParticleEffect (vec3_t origin, vec3_t direction, int color, int count)
 		return;
 	}
 
-	for (i=0 ; i<count ; i++)
+	// AD-style: more particles, two sizes, randomized positions
+	int total = (int)(count * 2.4);
+	for (i=0 ; i<total ; i++)
 	{
 		p	= addParticle();
 		if(!p)
-		{
 			return;
-		}
 
-		p->texnum			= blood_tex;
+		p->texnum			= particle_tex;
 		p->bounce			= 0;
-		p->scale			= 2;
-		p->alpha			= 200;
-		p->die				= cl.time + 5;
+		p->scale			= (rand() & 1) ? 0.64f : 1.28f; // small or medium
+		p->alpha			= 255;
+		p->die				= cl.time + 0.5f + (rand() & 15) * 0.05f;
 
 		color24				= (byte *) &d_8to24table[(int)(rand() & 3) + color];
 
@@ -888,19 +929,19 @@ void R_RunParticleEffect (vec3_t origin, vec3_t direction, int color, int count)
 		p->colorblue		= color24[2];
 
 		p->growth			= 0;
-		p->fade				= -64;
-		p->gravity			= -0.5f * sv_gravity.value;
+		p->fade				= -300;
+		p->gravity			= -0.4f * sv_gravity.value;
 
-		p->type				= pt_blood;
+		p->type				= pt_grav;
 		p->glow				= false;
 
-		p->origin[0]		= origin[0] + ((rand() & 15) - 8);
-		p->origin[1]		= origin[1] + ((rand() & 15) - 8);
-		p->origin[2]		= origin[2] + ((rand() & 15) - 8);
+		p->origin[0]		= origin[0] + ((rand() & 7) - 4);
+		p->origin[1]		= origin[1] + ((rand() & 7) - 4);
+		p->origin[2]		= origin[2] + ((rand() & 7) - 4);
 
-		p->velocity[0]		= direction[0] * 15;
-		p->velocity[1]		= direction[1] * 15;
-		p->velocity[2]		= direction[2] * 15;
+		p->velocity[0]		= direction[0] * 15 + ((rand() & 63) - 32);
+		p->velocity[1]		= direction[1] * 15 + ((rand() & 63) - 32);
+		p->velocity[2]		= direction[2] * 15 + ((rand() & 63) - 32);
 	}
 }
 
@@ -1303,35 +1344,41 @@ void R_RocketTrail (vec3_t start, vec3_t end, entity_t *ent)
 
 	if (cl.time > ent->time_left)
 	{
+		// AD-style: emit multiple trail puffs per interval
+		int puffs = 3;
+		for (int j = 0; j < puffs; j++)
+		{
 		p	= addParticle();
 		if(!p)
 		{
 			return;
 		}
 
-		VectorCopy(start, p->origin);
+		p->origin[0] = start[0] + ((rand() & 7) - 4);
+		p->origin[1] = start[1] + ((rand() & 7) - 4);
+		p->origin[2] = start[2] + ((rand() & 7) - 4);
 
 		if (contents == CONTENTS_EMPTY || contents == CONTENTS_SOLID)
 		{
-			p->die			= cl.time + 10;
+			p->die			= cl.time + 0.8f + (rand() & 7) * 0.1f;
 
-			p->colorred		= 187;
-			p->colorgreen	= 187;
-			p->colorblue	= 187;			
+			p->colorred		= 160 + (rand() & 31);
+			p->colorgreen	= 140 + (rand() & 31);
+			p->colorblue	= 120 + (rand() & 31);
 
-			p->fade			= -255;
-			p->growth		= 16;
+			p->fade			= -300;
+			p->growth		= 4;
 			p->gravity		= 0;
 
 			p->alpha		= ent->debris_smoke * 28;
-			p->scale		= 2;
+			p->scale		= (rand() & 1) ? 1.0f : 2.0f; // small or medium
 			p->texnum		= smoke1_tex + (rand() & 3);
 			p->type			= pt_smoke;
 			p->bounce		= 0;
 
-			p->velocity[0]	= (rand() & 15) - 8;
-			p->velocity[1]	= (rand() & 15) - 8;
-			p->velocity[2]	= (rand() & 31) + 15;
+			p->velocity[0]	= (rand() & 3) - 2;
+			p->velocity[1]	= (rand() & 3) - 2;
+			p->velocity[2]	= (rand() & 15) + 5;  // gentle ascend
 		}
 		else
 		{
@@ -1356,8 +1403,9 @@ void R_RocketTrail (vec3_t start, vec3_t end, entity_t *ent)
 			p->velocity[2]	= 20;
 		}
 		p->glow				= false;
-		ent->time_left		= cl.time + 0.05;
-		ent->debris_smoke	-= 0.05f;
+		} // end puffs loop
+		ent->time_left		= cl.time + 0.03;  // more frequent puffs
+		ent->debris_smoke	-= 0.03f;
 	}
 }
 
@@ -1776,77 +1824,88 @@ void R_MoveParticles( void )
 
 void R_DrawParticles (qboolean inwater)
 {
-	int			texnum;
-	
-	byte		alpha;
-	
-	vec3_t		up		= {vup[0]    * 0.75f, vup[1]    * 0.75f, vup[2]    * 0.75f};
-	vec3_t		right	= {vright[0] * 0.75f, vright[1] * 0.75f, vright[2] * 0.75f};
-	vec3_t		coord[4];
+	particle_t	*p = active_particles;
 
-	particle_t	*p		= active_particles;	
-
-	if( !p )
-	{
+	if (!p)
 		return;
-	}
-		
+
+	if (!part_shader_ok)
+		return;
+
+	// 45-degree rotated billboard vectors, reduced size
+	float sz = 0.20f;
+	vec3_t up, right, coord[4];
+	up[0]    = (vup[0] + vright[0]) * sz;
+	up[1]    = (vup[1] + vright[1]) * sz;
+	up[2]    = (vup[2] + vright[2]) * sz;
+	right[0] = (vright[0] - vup[0]) * sz;
+	right[1] = (vright[1] - vup[1]) * sz;
+	right[2] = (vright[2] - vup[2]) * sz;
+
 	VectorAdd      (up, right, coord[0]);
 	VectorSubtract (right, up, coord[1]);
 	VectorNegate   (coord[0], coord[2]);
 	VectorNegate   (coord[1], coord[3]);
 
-	texnum = p->texnum;
-	glBindTexture (GL_TEXTURE_2D, texnum);
-	glTexEnvf     (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glDepthMask   (false);
-	glBlendFunc   (GL_SRC_ALPHA, GL_ONE);
-
-	while (p)
+	// Build triangle soup into the streaming VBO.
+	// Each particle = 4 triangles from center (opaque) to rotated-quad edges (transparent).
+	int nverts = 0;
+	for (p = active_particles; p; p = p->next)
 	{
-		if (p->texnum != texnum)
-		{
-			texnum = p->texnum;
-			glBindTexture (GL_TEXTURE_2D, texnum);
-		}
-		
 		if ((!inwater && p->contents != CONTENTS_EMPTY) || (inwater && p->contents == CONTENTS_EMPTY))
-		{
-			p = p->next;
 			continue;
+
+		if (nverts + 12 > MAX_PART_VERTS)
+			break;
+
+		float s  = p->scale;
+		float ox = p->origin[0], oy = p->origin[1], oz = p->origin[2];
+		unsigned char r = p->colorred, g = p->colorgreen, b = p->colorblue;
+		unsigned char a = (unsigned char)p->alpha;
+
+		float vx[4], vy[4], vz[4];
+		for (int i = 0; i < 4; i++)
+		{
+			vx[i] = ox + coord[i][0]*s;
+			vy[i] = oy + coord[i][1]*s;
+			vz[i] = oz + coord[i][2]*s;
 		}
-				
-		alpha	= p->alpha;
-		
-		glColor4ub(p->colorred, p->colorgreen, p->colorblue, alpha);
-				
-		glPushMatrix();
-		{	
-			glTranslatef( p->origin[0], p->origin[1], p->origin[2] );
-			glScalef( p->scale, p->scale, p->scale );
-			
-			glBegin (GL_QUADS);
-			{
-				glTexCoord2f (0, 1);
-				glVertex3fv  (coord[0]);
-				glTexCoord2f (0, 0);
-				glVertex3fv  (coord[1]);
-				glTexCoord2f (1, 0); 
-				glVertex3fv  (coord[2]);
-				glTexCoord2f (1, 1);
-				glVertex3fv  (coord[3]);
-				
-			}
-			glEnd ();
-			
+
+		for (int i = 0; i < 4; i++)
+		{
+			int j = (i + 1) & 3;
+			particle_vertex_t *v = &part_verts[nverts];
+			v[0].x = ox;    v[0].y = oy;    v[0].z = oz;    v[0].r = r; v[0].g = g; v[0].b = b; v[0].a = a;
+			v[1].x = vx[i]; v[1].y = vy[i]; v[1].z = vz[i]; v[1].r = r; v[1].g = g; v[1].b = b; v[1].a = 0;
+			v[2].x = vx[j]; v[2].y = vy[j]; v[2].z = vz[j]; v[2].r = r; v[2].g = g; v[2].b = b; v[2].a = 0;
+			nverts += 3;
 		}
-		glPopMatrix ();
-				
-		p = p->next;
 	}
 
-	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glTexEnvf   (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-	glDepthMask (true);
-	glColor4f   (1,1,1,1);
+	if (nverts == 0)
+		return;
+
+	float mvp[16];
+	R_CurrentMVP(mvp);
+
+	// Save and adjust state. We must leave the fixed-function pipeline in the
+	// state the rest of the engine expects on return.
+	glDepthMask(GL_FALSE);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+	glDisable(GL_TEXTURE_2D);
+
+	GLShader_Use(&R_ParticleShader);
+	glUniformMatrix4fv(R_ParticleShader_u_mvp, 1, GL_FALSE, mvp);
+
+	DynamicVBO_Upload(&part_vbo, part_verts, (GLsizei)(nverts * sizeof(particle_vertex_t)));
+	DynamicVBO_Bind(&part_vbo);
+	glDrawArrays(GL_TRIANGLES, 0, nverts);
+
+	// Leave a clean state for the legacy fixed-function paths that run after us.
+	glBindVertexArray(0);
+	glUseProgram(0);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_TEXTURE_2D);
+	glColor4f(1, 1, 1, 1);
 }

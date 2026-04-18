@@ -25,8 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #pragma warning(disable : 4051)     // ALPHA
 #endif
 
+#include <glad/glad.h>
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_opengl.h>
 
 void GL_BeginRendering (int *x, int *y, int *width, int *height);
 void GL_EndRendering (void);
@@ -64,11 +64,6 @@ typedef struct
 extern glvert_t glv;
 
 extern	int glx, gly, glwidth, glheight;
-
-extern	PROC glArrayElementEXT;
-extern	PROC glColorPointerEXT;
-extern	PROC glTexturePointerEXT;
-extern	PROC glVertexPointerEXT;
 
 // r_local.h -- private refresh defs
 
@@ -113,7 +108,6 @@ extern	int	playertextures;
 extern	cvar_t	r_norefresh;
 extern	cvar_t	r_drawviewmodel;
 extern	cvar_t	r_speeds;
-extern	cvar_t	r_shadows;
 extern	cvar_t	r_wateralpha;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_novis;
@@ -151,16 +145,12 @@ extern  cvar_t  con_alpha;		// Tomaz - Console Alpha
 extern  cvar_t  r_wave;			// Tomaz - Water Wave
 extern  cvar_t  gl_glows;		// Tomaz - Glow
 extern  cvar_t  r_bobbing;		// Tomaz - Bobbing Items
-extern  cvar_t  gl_envmap;		// Tomaz - Enviroment Mapping
 extern  cvar_t  gl_caustics;	// Tomaz - Underwater Caustics
 extern  cvar_t  gl_fbr;			// Tomaz - Fullbrights
 extern  cvar_t  impaim;			// Tomaz - Improved Aiming
 extern  cvar_t  show_fps;		// Tomaz - FPS Counter
 extern  cvar_t  skybox_spin;	// Tomaz - Spinning Skyboxes
 extern  cvar_t  mapshots;		// Tomaz - MapShots
-extern  cvar_t  gl_showpolys;	// Tomaz - Show BSP Polygons
-extern  cvar_t  gl_wireframe;	// Tomaz - Draw World as Wireframe and Textures
-extern  cvar_t  gl_wireonly;	// Tomaz - Draw World as Wireframe Only
 extern  cvar_t  gl_particles;	// Tomaz - Particles
 extern  cvar_t  print_center_to_console;	// Tomaz - Prints CenterString's to the console
 extern  cvar_t  gl_particle_fire;	// Tomaz - Fire Particles
@@ -190,9 +180,8 @@ typedef void (APIENTRY *lpSelTexFUNC) (GLenum);
 extern lpMTexFUNC qglMTexCoord2fSGIS_ARB;
 extern lpSelTexFUNC qglSelectTextureSGIS_ARB;
 
-void EmitWaterPolys		(msurface_t *s);
+void EmitWaterPolys		(msurface_t *s, float alpha);
 void EmitSkyPolys		(msurface_t *s);
-void EmitEnvMapPolys	(msurface_t *s);
 void EmitCausticsPolys	(msurface_t *s);
 
 void Print(int x, int y, const char *string, ...);
@@ -205,5 +194,3 @@ void R_MarkLightsNoVis (dlight_t *light, int bit, mnode_t *node);
 void R_BlendedRotateForEntity (entity_t *e, int shadow);
 void R_StoreEfrags(efrag_t **ppefrag);
 
-void InitRenderScripts();
-void RS_DrawPic (int x, int y, qpic_t *pic);

@@ -21,6 +21,26 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // gl_sky.c all sky related stuff
 //
 #include "quakedef.h"
+#include "gl_render.h"
+
+typedef struct {
+	float x, y, z;
+	float s, t;
+} sky_vertex_t;
+
+static DynamicVBO skybox_vbo;
+static qboolean   skybox_vbo_ready = false;
+
+static void Skybox_EnsureVBO(void)
+{
+	if (skybox_vbo_ready) return;
+	if (!R_EnsureSpriteShader()) return;
+
+	DynamicVBO_Init(&skybox_vbo, 6 * sizeof(sky_vertex_t));
+	DynamicVBO_SetAttrib(&skybox_vbo, 0, 3, GL_FLOAT, GL_FALSE, sizeof(sky_vertex_t), offsetof(sky_vertex_t, x));
+	DynamicVBO_SetAttrib(&skybox_vbo, 1, 2, GL_FLOAT, GL_FALSE, sizeof(sky_vertex_t), offsetof(sky_vertex_t, s));
+	skybox_vbo_ready = true;
+}
 
 int		solidskytexture;
 int		alphaskytexture;
@@ -34,9 +54,27 @@ int		skytexture[6];
 /*
 =============
 EmitSkyPolys
+
+Classic Quake animated sky: solid layer scrolling slowly + alpha layer
+scrolling at double speed overlaid on top.
 =============
 */
-void EmitSkyPolys (msurface_t *s)
+typedef struct { float x, y, z; float s, t; } sky_poly_vtx_t;
+#define SKYPOLY_MAX_VERTS 4096
+static sky_poly_vtx_t skypoly_soup[SKYPOLY_MAX_VERTS];
+static DynamicVBO     skypoly_vbo;
+static qboolean       skypoly_vbo_ready = false;
+
+static void Skypoly_EnsureVBO(void)
+{
+	if (skypoly_vbo_ready) return;
+	DynamicVBO_Init(&skypoly_vbo, sizeof(skypoly_soup));
+	DynamicVBO_SetAttrib(&skypoly_vbo, 0, 3, GL_FLOAT, GL_FALSE, sizeof(sky_poly_vtx_t), offsetof(sky_poly_vtx_t, x));
+	DynamicVBO_SetAttrib(&skypoly_vbo, 1, 2, GL_FLOAT, GL_FALSE, sizeof(sky_poly_vtx_t), offsetof(sky_poly_vtx_t, s));
+	skypoly_vbo_ready = true;
+}
+
+static void EmitSkyPolys_Pass (msurface_t *s, float speed)
 {
 	glpoly_t	*p;
 	float		*v;
@@ -45,57 +83,82 @@ void EmitSkyPolys (msurface_t *s)
 	vec3_t		dir;
 	float		length;
 
-	glBindTexture (GL_TEXTURE_2D, solidskytexture);
-	speedscale = realtime*8;
+	speedscale = realtime * speed;
 	speedscale -= (int)speedscale & ~127;
 
-	for (p=s->polys ; p ; p=p->next)
+	static sky_poly_vtx_t fan[256];
+	int n = 0;
+
+	for (p = s->polys; p; p = p->next)
 	{
-		glBegin (GL_POLYGON);
-		for (i=0,v=p->verts[0] ; i<p->numverts ; i++, v+=VERTEXSIZE)
+		int nv = p->numverts;
+		if (nv > 256) nv = 256;
+
+		v = p->verts[0];
+		for (i = 0; i < nv; ++i, v += VERTEXSIZE)
 		{
-			VectorSubtract (v, r_origin, dir);
+			VectorSubtract(v, r_origin, dir);
 			dir[2] *= 3;	// flatten the sphere
 
-			length = 378/Length (dir);	// Tomaz - Speed
+			length = 378 / Length(dir);
 
 			dir[0] *= length;
 			dir[1] *= length;
 
-			r = (speedscale + dir[0]) * (0.0078125);	// Tomaz - Speed
-			t = (speedscale + dir[1]) * (0.0078125);	// Tomaz - Speed
+			r = (speedscale + dir[0]) * 0.0078125f;
+			t = (speedscale + dir[1]) * 0.0078125f;
 
-			glTexCoord2f (r, t);
-			glVertex3fv (v);
+			fan[i].x = v[0]; fan[i].y = v[1]; fan[i].z = v[2];
+			fan[i].s = r;    fan[i].t = t;
 		}
-		glEnd ();
-	}
 
-	glBindTexture (GL_TEXTURE_2D, alphaskytexture);
-	speedscale = realtime*16;
-	speedscale -= (int)speedscale & ~127;
-
-	for (p=s->polys ; p ; p=p->next)
-	{
-		glBegin (GL_POLYGON);
-		for (i=0,v=p->verts[0] ; i<p->numverts ; i++, v+=VERTEXSIZE)
+		for (int k = 1; k < nv - 1; ++k)
 		{
-			VectorSubtract (v, r_origin, dir);
-			dir[2] *= 3;	// flatten the sphere
-
-			length = 378/Length (dir);	// Tomaz - Speed
-
-			dir[0] *= length;
-			dir[1] *= length;
-
-			r = (speedscale + dir[0]) * (0.0078125);	// Tomaz - Speed
-			t = (speedscale + dir[1]) * (0.0078125);	// Tomaz - Speed
-
-			glTexCoord2f (r, t);
-			glVertex3fv (v);
+			if (n + 3 > SKYPOLY_MAX_VERTS) goto flush;
+			skypoly_soup[n++] = fan[0];
+			skypoly_soup[n++] = fan[k];
+			skypoly_soup[n++] = fan[k + 1];
 		}
-		glEnd ();
 	}
+
+flush:
+	if (n == 0) return;
+
+	DynamicVBO_Upload(&skypoly_vbo, skypoly_soup, (GLsizei)(n * sizeof(sky_poly_vtx_t)));
+	DynamicVBO_Bind(&skypoly_vbo);
+	glDrawArrays(GL_TRIANGLES, 0, n);
+}
+
+void EmitSkyPolys (msurface_t *s)
+{
+	if (!R_EnsureSpriteShader()) return;
+	Skypoly_EnsureVBO();
+
+	float mvp[16];
+	R_CurrentMVP(mvp);
+
+	GLShader_Use(&R_SpriteShader);
+	glUniformMatrix4fv(R_SpriteShader_u_mvp, 1, GL_FALSE, mvp);
+	glUniform4f       (R_SpriteShader_u_color, 1.0f, 1.0f, 1.0f, 1.0f);
+	glUniform1i       (R_SpriteShader_u_tex, 0);
+
+	// Pass 1: solid sky, slow scroll.
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, solidskytexture);
+	EmitSkyPolys_Pass(s, 8.0f);
+
+	// Pass 2: alpha sky, double-speed scroll, blended over pass 1.
+	GLboolean blend_was_on = glIsEnabled(GL_BLEND);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	glBindTexture(GL_TEXTURE_2D, alphaskytexture);
+	EmitSkyPolys_Pass(s, 16.0f);
+
+	if (!blend_was_on) glDisable(GL_BLEND);
+
+	glBindVertexArray(0);
+	glUseProgram(0);
 }
 
 
@@ -165,59 +228,65 @@ R_DrawSkyBox
 */
 int	skytexorder[6] = {0,2,1,3,4,5};
 
-#define R_SkyBoxPolyVec(s,t,x,y,z) \
-	glTexCoord2f(s, t);\
-	glVertex3f((x) + r_refdef.vieworg[0], (y) + r_refdef.vieworg[1], (z) + r_refdef.vieworg[2]);
+// Layout of the 6 skybox faces. Each face is 4 corners in TL/TR/BR/BL order
+// matching the original (s,t) pairs: (0.998,0.002) (0.998,0.998) (0.002,0.998) (0.002,0.002).
+// Coordinates are relative to vieworg; we add vieworg at upload time so the sky follows the camera.
+static const float skybox_faces[6][4][3] = {
+	// face 3: front  (skytexorder index 3 -> suf[3] "ft")
+	{ { 3072, -3072,  3072}, { 3072, -3072, -3072}, { 3072,  3072, -3072}, { 3072,  3072,  3072} },
+	// face 2: back   (suf[1] "bk")
+	{ {-3072,  3072,  3072}, {-3072,  3072, -3072}, {-3072, -3072, -3072}, {-3072, -3072,  3072} },
+	// face 0: right  (suf[0] "rt")
+	{ { 3072,  3072,  3072}, { 3072,  3072, -3072}, {-3072,  3072, -3072}, {-3072,  3072,  3072} },
+	// face 1: left   (suf[2] "lf")
+	{ {-3072, -3072,  3072}, {-3072, -3072, -3072}, { 3072, -3072, -3072}, { 3072, -3072,  3072} },
+	// face 4: up     (suf[4] "up")
+	{ { 3072, -3072,  3072}, { 3072,  3072,  3072}, {-3072,  3072,  3072}, {-3072, -3072,  3072} },
+	// face 5: down   (suf[5] "dn")
+	{ { 3072,  3072, -3072}, { 3072, -3072, -3072}, {-3072, -3072, -3072}, {-3072,  3072, -3072} },
+};
+
+// Matches the texture index used for face i in the original code (skytexorder[3], [2], [0], [1], [4], [5]).
+static const int skybox_face_tex[6] = { 3, 2, 0, 1, 4, 5 };
 
 void R_DrawSkyBox (void)
 {
-	glBindTexture(GL_TEXTURE_2D, skytexture[skytexorder[3]]); // front
-	glBegin(GL_QUADS);
-	R_SkyBoxPolyVec(0.998047f, 0.001953f,  3072, -3072,  3072);
-	R_SkyBoxPolyVec(0.998047f, 0.998047f,  3072, -3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.998047f,  3072,  3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.001953f,  3072,  3072,  3072);
-	glEnd();
+	Skybox_EnsureVBO();
+	if (!skybox_vbo_ready)
+		return;
 
-	glBindTexture(GL_TEXTURE_2D, skytexture[skytexorder[2]]); // back
-	glBegin(GL_QUADS);
-	R_SkyBoxPolyVec(0.998047f, 0.001953f, -3072,  3072,  3072);
-	R_SkyBoxPolyVec(0.998047f, 0.998047f, -3072,  3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.998047f, -3072, -3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.001953f, -3072, -3072,  3072);
-	glEnd();
+	float mvp[16];
+	R_CurrentMVP(mvp);
 
-	glBindTexture(GL_TEXTURE_2D, skytexture[skytexorder[0]]); // right
-	glBegin(GL_QUADS);
-	R_SkyBoxPolyVec(0.998047f, 0.001953f,  3072,  3072,  3072);
-	R_SkyBoxPolyVec(0.998047f, 0.998047f,  3072,  3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.998047f, -3072,  3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.001953f, -3072,  3072,  3072);
-	glEnd();
+	GLShader_Use(&R_SpriteShader);
+	glUniformMatrix4fv(R_SpriteShader_u_mvp, 1, GL_FALSE, mvp);
+	glUniform4f       (R_SpriteShader_u_color, 1.0f, 1.0f, 1.0f, 1.0f);
+	glUniform1i       (R_SpriteShader_u_tex, 0);
 
-	glBindTexture(GL_TEXTURE_2D, skytexture[skytexorder[1]]); // left
-	glBegin(GL_QUADS);
-	R_SkyBoxPolyVec(0.998047f, 0.001953f, -3072, -3072,  3072);
-	R_SkyBoxPolyVec(0.998047f, 0.998047f, -3072, -3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.998047f,  3072, -3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.001953f,  3072, -3072,  3072);
-	glEnd();
+	DynamicVBO_Bind(&skybox_vbo);
 
-	glBindTexture(GL_TEXTURE_2D, skytexture[skytexorder[4]]); // up
-	glBegin(GL_QUADS);
-	R_SkyBoxPolyVec(0.998047f, 0.001953f,  3072, -3072,  3072);
-	R_SkyBoxPolyVec(0.998047f, 0.998047f,  3072,  3072,  3072);
-	R_SkyBoxPolyVec(0.001953f, 0.998047f, -3072,  3072,  3072);
-	R_SkyBoxPolyVec(0.001953f, 0.001953f, -3072, -3072,  3072);
-	glEnd();
+	const float s_lo = 0.001953f, s_hi = 0.998047f;
+	float vx = r_refdef.vieworg[0], vy = r_refdef.vieworg[1], vz = r_refdef.vieworg[2];
 
-	glBindTexture(GL_TEXTURE_2D, skytexture[skytexorder[5]]); // down
-	glBegin(GL_QUADS);
-	R_SkyBoxPolyVec(0.998047f, 0.001953f,  3072,  3072, -3072);
-	R_SkyBoxPolyVec(0.998047f, 0.998047f,  3072, -3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.998047f, -3072, -3072, -3072);
-	R_SkyBoxPolyVec(0.001953f, 0.001953f, -3072,  3072, -3072);
-	glEnd();
+	for (int f = 0; f < 6; ++f)
+	{
+		const float (*c)[3] = skybox_faces[f];
+		sky_vertex_t v[6];
+		// corners: TL=c[0](s_hi,s_lo), TR=c[1](s_hi,s_hi), BR=c[2](s_lo,s_hi), BL=c[3](s_lo,s_lo)
+		v[0] = { c[0][0]+vx, c[0][1]+vy, c[0][2]+vz, s_hi, s_lo };
+		v[1] = { c[1][0]+vx, c[1][1]+vy, c[1][2]+vz, s_hi, s_hi };
+		v[2] = { c[2][0]+vx, c[2][1]+vy, c[2][2]+vz, s_lo, s_hi };
+		v[3] = { c[0][0]+vx, c[0][1]+vy, c[0][2]+vz, s_hi, s_lo };
+		v[4] = { c[2][0]+vx, c[2][1]+vy, c[2][2]+vz, s_lo, s_hi };
+		v[5] = { c[3][0]+vx, c[3][1]+vy, c[3][2]+vz, s_lo, s_lo };
+
+		glBindTexture(GL_TEXTURE_2D, skytexture[skytexorder[skybox_face_tex[f]]]);
+		DynamicVBO_Upload(&skybox_vbo, v, sizeof(v));
+		glDrawArrays(GL_TRIANGLES, 0, 6);
+	}
+
+	glBindVertexArray(0);
+	glUseProgram(0);
 }
 
 //===============================================================

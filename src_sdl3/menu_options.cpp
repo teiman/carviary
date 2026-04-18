@@ -501,7 +501,7 @@ Video Menu
 */
 
 int		video_cursor;
-#define	VIDEO_ITEMS	18
+#define	VIDEO_ITEMS	16
 
 void M_Menu_Video_f () 
 {
@@ -535,12 +535,8 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("brightness", brightness.value);
 		break;
 
-	case 2:		// shadows
-		Cvar_SetValue ("r_shadows", !r_shadows.value);
-		break;
-
-	case 3:		// water alpha
-		r_wateralpha.value += dir * 0.05; 
+	case 2:		// water alpha
+		r_wateralpha.value += dir * 0.05;
 		if (r_wateralpha.value < 0)
 			r_wateralpha.value = 0;
 		if (r_wateralpha.value > 1)
@@ -548,8 +544,8 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("r_wateralpha", r_wateralpha.value);
 		break;
 
-	case 4:		// console alpha
-		con_alpha.value += dir * 0.05; 
+	case 3:		// console alpha
+		con_alpha.value += dir * 0.05;
 		if (con_alpha.value < 0)
 			con_alpha.value = 0;
 		if (con_alpha.value > 1)
@@ -557,8 +553,8 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("con_alpha", con_alpha.value);
 		break;
 
-	case 5:		// sbar alpha
-		sbar_alpha.value += dir * 0.05; 
+	case 4:		// sbar alpha
+		sbar_alpha.value += dir * 0.05;
 		if (sbar_alpha.value < 0)
 			sbar_alpha.value = 0;
 		if (sbar_alpha.value > 1)
@@ -566,31 +562,27 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("sbar_alpha", sbar_alpha.value);
 		break;
 
-	case 6:	// Glows
+	case 5:	// Glows
 		Cvar_SetValue ("gl_glows", !gl_glows.value);
 		break;
 
-	case 7:	// Fullbrights
+	case 6:	// Fullbrights
 		Cvar_SetValue ("gl_fbr", !gl_fbr.value);
 		break;
 
-	case 8:	// Enviroment Mapping
-		Cvar_SetValue ("gl_envmap", !gl_envmap.value);
-		break;
-
-	case 9:	// Underwater Caustics
+	case 7:	// Underwater Caustics
 		Cvar_SetValue ("gl_caustics", !gl_caustics.value);
 		break;
 
-	case 10:	// Fading CenterPrints
+	case 8:	// Fading CenterPrints
 		Cvar_SetValue ("centerfade", !centerfade.value);
 		break;
 
-	case 11:		// fog
+	case 9:		// fog
 		Cvar_SetValue ("gl_fogenable", !gl_fogenable.value);
 		break;
 
-	case 12:	// fog start
+	case 10:	// fog start
 		gl_fogstart.value += dir * 50.0f;
 		if (gl_fogstart.value < 0.0f)
 			gl_fogstart.value = 0.0f;
@@ -601,7 +593,7 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("gl_fogstart", gl_fogstart.value);
 		break;
 
-	case 13:	// fog end
+	case 11:	// fog end
 		gl_fogend.value += dir * 50.0f;
 		if (gl_fogend.value < 500.0f)
 			gl_fogend.value = 500.0f;
@@ -612,7 +604,7 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("gl_fogend", gl_fogend.value);
 		break;
 
-	case 14:	// fog red
+	case 12:	// fog red
 		gl_fogred.value += dir * 0.05f;
 		if (gl_fogred.value < 0.0f)
 			gl_fogred.value = 0.0f;
@@ -621,7 +613,7 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("gl_fogred", gl_fogred.value);
 		break;
 
-	case 15:	// fog green 
+	case 13:	// fog green
 		gl_foggreen.value += dir * 0.05f;
 		if (gl_foggreen.value < 0.0f)
 			gl_foggreen.value = 0.0f;
@@ -630,7 +622,7 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("gl_foggreen", gl_foggreen.value);
 		break;
 
-	case 16:	// fog blue
+	case 14:	// fog blue
 		gl_fogblue.value += dir * 0.05f;
 		if (gl_fogblue.value < 0.0f)
 			gl_fogblue.value = 0.0f;
@@ -639,7 +631,7 @@ void M_VideoAdjustSliders (int dir)
 		Cvar_SetValue ("gl_fogblue", gl_fogblue.value);
 		break;
 
-	case 17:	// Crosshair graphic
+	case 15:	// Crosshair graphic
 		crosshair.value += dir * 1.0f;
 		if (crosshair.value < 0.0f)
 			crosshair.value = 0.0f;
@@ -662,73 +654,67 @@ void M_Video_Draw ()
 	r = (1.0 - brightness.value) * 2;
 	M_DrawSlider (220, 40, r);
 
-	M_Print (16, 48,"               Shadows");
-	M_DrawCheckbox (220, 48, r_shadows.value);
-
-	M_Print (16, 56, "           Water Alpha");
+	M_Print (16, 48, "           Water Alpha");
 	r = r_wateralpha.value;
+	M_DrawSlider (220, 48, r);
+
+	M_Print (16, 56, "         Console Alpha");
+	r = con_alpha.value;
 	M_DrawSlider (220, 56, r);
 
-	M_Print (16, 64, "         Console Alpha");
-	r = con_alpha.value;
+	M_Print (16, 64, "      Status Bar Alpha");
+	r = sbar_alpha.value;
 	M_DrawSlider (220, 64, r);
 
-	M_Print (16, 72, "      Status Bar Alpha");
-	r = sbar_alpha.value;
-	M_DrawSlider (220, 72, r);
+	M_Print (16, 72, "                 Glows");
+	M_DrawCheckbox (220, 72, gl_glows.value);
 
-	M_Print (16, 80, "                 Glows");
-	M_DrawCheckbox (220, 80, gl_glows.value);
+	M_Print (16, 80, "           Fullbrights");
+	M_DrawCheckbox (220, 80, gl_fbr.value);
 
-	M_Print (16, 88, "           Fullbrights");
-	M_DrawCheckbox (220, 88, gl_fbr.value);
+	M_Print (16, 88, "   Underwater Caustics");
+	M_DrawCheckbox (220, 88, gl_caustics.value);
 
-	M_Print (16, 96, "    Enviroment Mapping");
-	M_DrawCheckbox (220, 96, gl_envmap.value);
+	M_Print (16, 96, "   Fading CenterPrints");
+	M_DrawCheckbox (220, 96, centerfade.value);
 
-	M_Print (16, 104,"   Underwater Caustics");
-	M_DrawCheckbox (220, 104, gl_caustics.value);
+	M_Print (16, 104,"                   Fog");
+	M_DrawCheckbox (220, 104, gl_fogenable.value);
 
-	M_Print (16, 112,"   Fading CenterPrints");
-	M_DrawCheckbox (220, 112, centerfade.value);
-
-	M_Print (16, 120,"                   Fog");
-	M_DrawCheckbox (220, 120, gl_fogenable.value);
-
-	M_Print (16, 128,"             Fog Start");
+	M_Print (16, 112,"             Fog Start");
 	r = gl_fogstart.value * 0.000244140625;	// Tomaz - Speed
-	M_DrawSlider (220, 128, r);	
+	M_DrawSlider (220, 112, r);
 
-	M_Print (16, 136,"               Fog End");
+	M_Print (16, 120,"               Fog End");
 	r = gl_fogend.value * 0.000244140625;	// Tomaz - Speed
-	M_DrawSlider (220, 136, r);
+	M_DrawSlider (220, 120, r);
 
-	M_Print (16, 144,"               Red Fog");
+	M_Print (16, 128,"               Red Fog");
 
-	M_Print (16, 152,"             Green Fog");
+	M_Print (16, 136,"             Green Fog");
 
-	M_Print (16, 160,"              Blue Fog");
+	M_Print (16, 144,"              Blue Fog");
 
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);	
+	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
 	r = gl_fogred.value;
 	glColor3f(1,0,0);
-	M_DrawSlider (220, 144, r);
+	M_DrawSlider (220, 128, r);
 
 	r = gl_foggreen.value;
 	glColor3f(0,1,0);
-	M_DrawSlider (220, 152, r);
+	M_DrawSlider (220, 136, r);
 
 	r = gl_fogblue.value;
 	glColor3f(0,0,1);
-	M_DrawSlider (220, 160, r);
+	M_DrawSlider (220, 144, r);
 	glColor3f(1,1,1);
 
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 
-	M_Print (16, 168,"             Crosshair");
+	M_Print (16, 152,"             Crosshair");
 	r = crosshair.value * 0.1;	// Tomaz - Speed
-	M_DrawSlider (220, 168, r);
+	M_DrawSlider (220, 152, r);
 
 	M_DrawCharacter (200, 32 + video_cursor*8, 12+((int)(realtime*4)&1));
 }

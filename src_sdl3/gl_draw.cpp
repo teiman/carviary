@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // vid buffer
 
 #include "quakedef.h"
+#include "gl_render.h"
 
 //
 // Structures
@@ -72,7 +73,6 @@ int			map_snapshot;			// MapShots
 int			map_snapname;			// MapShots
 int			gl_solid_format = 3;
 int			gl_alpha_format = 4;
-int			GetRSForName(char name[56]);
 int			menu_numcachepics;
 int			pic_texels;
 int			pic_count;
@@ -232,13 +232,6 @@ void Draw_Init (void)
 	Cvar_RegisterVariable (&gl_max_size);
 	Cvar_RegisterVariable (&pr_checkextension);
 	
-	Con_Printf("Loading Scripts\n");
-
-	//
-	// Initialize rscript
-	//
-	InitRenderScripts(); 
-
 	glGetIntegerv( GL_MAX_TEXTURE_SIZE, &maxsize );
 		Cvar_SetValue ("gl_max_size", (int)maxsize);
 
@@ -292,7 +285,6 @@ void Draw_Init (void)
 	gl->sh = 1;
 	gl->tl = 0;
 	gl->th = 1;
-	conback->rs = GetRSForName("conback");
 	conback->width = vid.width;
 	conback->height = vid.height;
 
@@ -345,34 +337,15 @@ void Draw_MapShots(void)
 	if(!mapshots.value)
 		return;
 
-	x = vid.width	* 0.5; 
+	x = vid.width	* 0.5;
 	y = vid.height	* 0.5;
 
 	glClear(GL_COLOR_BUFFER_BIT);
 
-	glBindTexture (GL_TEXTURE_2D, map_snapname);
-	glBegin (GL_QUADS);
-	glTexCoord2f (0,0);
-	glVertex2f (x-128, y-192);
-	glTexCoord2f (1,0);
-	glVertex2f (x+128, y-192);
-	glTexCoord2f (1,1);	
-	glVertex2f (x+128, y-64);
-	glTexCoord2f (0,1);
-	glVertex2f (x-128, y-64);
-	glEnd ();
-
-	glBindTexture (GL_TEXTURE_2D, map_snapshot);
-	glBegin (GL_QUADS);
-	glTexCoord2f (0,0);
-	glVertex2f (0,0);
-	glTexCoord2f (1,0);
-	glVertex2f (vid.width,0);
-	glTexCoord2f (1,1);	
-	glVertex2f (vid.width, vid.height);
-	glTexCoord2f (0,1);
-	glVertex2f (0, vid.height);
-	glEnd ();
+	R_HudTexQuad(x - 128, y - 192, 256, 128, map_snapname,
+	             0, 0, 1, 1, 1, 1, 1, 1);
+	R_HudTexQuad(0, 0, vid.width, vid.height, map_snapshot,
+	             0, 0, 1, 1, 1, 1, 1, 1);
 }
 
 /*
@@ -384,27 +357,10 @@ Draws a picture with an alpha value.
 */
 void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 {
-	glpic_t			*gl;
-
-	gl = (glpic_t *)pic->data;
-
-	glColor4f (1,1,1,alpha);
-	glBindTexture (GL_TEXTURE_2D, gl->texnum);
-
-	glBegin (GL_QUADS);
-
-	glTexCoord2f	(gl->sl,		gl->tl);
-	glVertex2f		(x,				y);
-	glTexCoord2f	(gl->sh,		gl->tl);
-	glVertex2f		(x+pic->width,	y);
-	glTexCoord2f	(gl->sh,		gl->th);
-	glVertex2f		(x+pic->width,	y+pic->height);
-	glTexCoord2f	(gl->sl,		gl->th);
-	glVertex2f		(x,				y+pic->height);
-
-	glEnd ();
-
-	glColor4f (1,1,1,1);
+	glpic_t *gl = (glpic_t *)pic->data;
+	R_HudTexQuad(x, y, pic->width, pic->height, gl->texnum,
+	             gl->sl, gl->tl, gl->sh, gl->th,
+	             1, 1, 1, alpha);
 }
 
 /*
@@ -416,21 +372,10 @@ Draws a normal picture.
 */
 void Draw_Pic (int x, int y, qpic_t *pic)
 {
-	glpic_t			*gl;
-
-	gl = (glpic_t *)pic->data;
-
-	glBindTexture (GL_TEXTURE_2D, gl->texnum);
-	glBegin (GL_QUADS);
-	glTexCoord2f (gl->sl,       gl->tl);
-	glVertex2f   (x,            y);
-	glTexCoord2f (gl->sh,       gl->tl);
-	glVertex2f   (x+pic->width, y);
-	glTexCoord2f (gl->sh,       gl->th);
-	glVertex2f   (x+pic->width, y+pic->height);
-	glTexCoord2f (gl->sl,       gl->th);
-	glVertex2f   (x,            y+pic->height);
-	glEnd ();
+	glpic_t *gl = (glpic_t *)pic->data;
+	R_HudTexQuad(x, y, pic->width, pic->height, gl->texnum,
+	             gl->sl, gl->tl, gl->sh, gl->th,
+	             1, 1, 1, 1);
 }
 
 /*
@@ -470,16 +415,8 @@ void Draw_MenuPlayer (int x, int y, qpic_t *pic, byte *translation)
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-	glBegin (GL_QUADS);
-	glTexCoord2f (0, 0);
-	glVertex2f (x, y);
-	glTexCoord2f (1, 0);
-	glVertex2f (x+pic->width, y);
-	glTexCoord2f (1, 1);
-	glVertex2f (x+pic->width, y+pic->height);
-	glTexCoord2f (0, 1);
-	glVertex2f (x, y+pic->height);
-	glEnd ();
+	R_HudTexQuad(x, y, pic->width, pic->height, translate_texture,
+	             0, 0, 1, 1, 1, 1, 1, 1);
 }
 
 /*
@@ -491,7 +428,7 @@ void Draw_ConsoleBackground (int lines)
 {
 	char version[32];
 
-	RS_DrawPic(0,lines - vid.height, conback);
+	Draw_Pic(0, lines - vid.height, conback);
 
 	_snprintf (version, sizeof(version), "TomazQuake %.3f", (float) TOMAZQUAKE_VERSION);
 
@@ -508,17 +445,10 @@ refresh window.
 */
 void Draw_TileClear (int x, int y, int w, int h)
 {
-	glBindTexture (GL_TEXTURE_2D, *(int *)draw_backtile->data);
-	glBegin (GL_QUADS);
-	glTexCoord2f (x/64.0, y/64.0);
-	glVertex2f (x, y);
-	glTexCoord2f ( (x+w)/64.0, y/64.0);
-	glVertex2f (x+w, y);
-	glTexCoord2f ( (x+w)/64.0, (y+h)/64.0);
-	glVertex2f (x+w, y+h);
-	glTexCoord2f ( x/64.0, (y+h)/64.0 );
-	glVertex2f (x, y+h);
-	glEnd ();
+	int tex = *(int *)draw_backtile->data;
+	R_HudTexQuad(x, y, w, h, tex,
+	             x / 64.0f, y / 64.0f, (x + w) / 64.0f, (y + h) / 64.0f,
+	             1, 1, 1, 1);
 }
 
 
@@ -531,21 +461,11 @@ Fills a box of pixels with a single color
 */
 void Draw_Fill (int x, int y, int w, int h, int c)
 {
-	glDisable (GL_TEXTURE_2D);
-	glColor3f (host_basepal[c*3  ]/255.0,
-			   host_basepal[c*3+1]/255.0,
-			   host_basepal[c*3+2]/255.0);
-
-	glBegin (GL_QUADS);
-
-	glVertex2f (x,y);
-	glVertex2f (x+w, y);
-	glVertex2f (x+w, y+h);
-	glVertex2f (x, y+h);
-
-	glEnd ();
-	glColor3f (1,1,1);
-	glEnable (GL_TEXTURE_2D);
+	R_HudFill(x, y, w, h,
+	          host_basepal[c*3  ] / 255.0f,
+	          host_basepal[c*3+1] / 255.0f,
+	          host_basepal[c*3+2] / 255.0f,
+	          1.0f);
 }
 
 /*
@@ -556,18 +476,7 @@ Draw_FadeScreen
 */
 void Draw_FadeScreen (void)
 {
-	glDisable (GL_TEXTURE_2D);
-	glColor4f (0,0,0,0.75f);	// Tomaz - Menu Transparency
-	glBegin (GL_QUADS);
-
-	glVertex2f (0,0);
-	glVertex2f (vid.width, 0);
-	glVertex2f (vid.width, vid.height);
-	glVertex2f (0, vid.height);
-
-	glEnd ();
-	glColor4f (1,1,1,1);
-	glEnable (GL_TEXTURE_2D);
+	R_HudFill(0, 0, vid.width, vid.height, 0, 0, 0, 0.75f);	// Tomaz - Menu Transparency
 }
 
 /*

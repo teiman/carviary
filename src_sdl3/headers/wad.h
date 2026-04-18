@@ -40,7 +40,6 @@ typedef struct
 {
 	int			width, height;
 	byte		data[4];			// variably sized
-	int			rs;					// Tomaz - Rscripts
 } qpic_t;
 
 
