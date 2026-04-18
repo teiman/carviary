@@ -343,6 +343,144 @@ qboolean started_loading;
 
 /*
 ================
+Alias_BuildGPUData
+
+Phase 1 of the GPU alias path. For each loaded MDL we create GL buffers the
+shader path will use:
+
+  - gpu_ssbo_poses: all `numposes` poses laid out contiguously. Each vertex
+    is 4 bytes {byte v[3], byte lightnormalindex}. Indexed by the shader as
+    (pose_index * poseverts + slot). Same layout as aliashdr->posedata.
+  - gpu_vbo_texcoords: one {float s, t} per slot (poseverts entries).
+    Extracted from the command list -- they are constant across poses.
+  - gpu_ibo: triangle list (uint16 per index), built by pre-triangulating
+    the command list's strips and fans into plain GL_TRIANGLES. No more
+    per-frame retriangulation.
+
+All buffers are GL_STATIC_DRAW / immutable once uploaded. They live for the
+lifetime of the model.
+
+This runs at the tail of GL_MakeAliasModelDisplayLists, after `commands[]`
+and `posedata` are set up.
+================
+*/
+static void Alias_BuildGPUData (aliashdr_t *hdr)
+{
+	const int poseverts = hdr->poseverts;
+	const int numposes  = hdr->numposes;
+	if (poseverts <= 0 || numposes <= 0) return;
+
+	const int *cmds = (const int *)((byte *)hdr + hdr->commands);
+	const trivertx_t *posedata = (const trivertx_t *)((byte *)hdr + hdr->posedata);
+
+	// Pass 1: allocate per-slot texcoords + count triangles.
+	// `poseverts` slots total (== numorder at build time), one (s,t) each.
+	float *texcoords = (float *)malloc(poseverts * 2 * sizeof(float));
+	if (!texcoords) return;
+	// Default all slots to 0; only slots that appear in the command stream
+	// get real coords. Unreferenced slots can't be indexed by the IBO, so
+	// garbage there is harmless.
+	memset(texcoords, 0, poseverts * 2 * sizeof(float));
+
+	int num_triangles = 0;
+	int slot = 0;
+	const int *p = cmds;
+	for (;;) {
+		int count = *p++;
+		if (count == 0) break;
+		qboolean is_fan = (count < 0);
+		int n = is_fan ? -count : count;
+		if (slot + n > poseverts) break; // defensive
+
+		for (int i = 0; i < n; ++i) {
+			float s = ((const float *)p)[0];
+			float t = ((const float *)p)[1];
+			p += 2;
+			texcoords[slot*2 + 0] = s;
+			texcoords[slot*2 + 1] = t;
+			slot++;
+		}
+		if (n >= 3) num_triangles += (n - 2);
+	}
+
+	if (num_triangles == 0) {
+		free(texcoords);
+		return;
+	}
+
+	// Pass 2: build the index list. We walk the command stream again, this
+	// time tracking the slot numbers (which are just the running counter),
+	// and emit (n-2) triangles per strip/fan.
+	unsigned short *indices = (unsigned short *)malloc(num_triangles * 3 * sizeof(unsigned short));
+	if (!indices) { free(texcoords); return; }
+
+	int ibo_pos = 0;
+	slot = 0;
+	p = cmds;
+	for (;;) {
+		int count = *p++;
+		if (count == 0) break;
+		qboolean is_fan = (count < 0);
+		int n = is_fan ? -count : count;
+		p += n * 2; // skip the (s,t) pairs, we already extracted them
+
+		int base = slot;
+		if (is_fan) {
+			for (int i = 1; i < n - 1; ++i) {
+				indices[ibo_pos++] = (unsigned short)(base + 0);
+				indices[ibo_pos++] = (unsigned short)(base + i);
+				indices[ibo_pos++] = (unsigned short)(base + i + 1);
+			}
+		} else {
+			// Triangle strip: winding flips every other tri.
+			for (int i = 0; i < n - 2; ++i) {
+				if (i & 1) {
+					indices[ibo_pos++] = (unsigned short)(base + i + 1);
+					indices[ibo_pos++] = (unsigned short)(base + i);
+					indices[ibo_pos++] = (unsigned short)(base + i + 2);
+				} else {
+					indices[ibo_pos++] = (unsigned short)(base + i);
+					indices[ibo_pos++] = (unsigned short)(base + i + 1);
+					indices[ibo_pos++] = (unsigned short)(base + i + 2);
+				}
+			}
+		}
+		slot += n;
+	}
+
+	// Upload.
+	GLuint ssbo = 0, vbo = 0, ibo = 0;
+	glGenBuffers(1, &ssbo);
+	glGenBuffers(1, &vbo);
+	glGenBuffers(1, &ibo);
+
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER,
+	             numposes * poseverts * sizeof(trivertx_t),
+	             posedata, GL_STATIC_DRAW);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, poseverts * 2 * sizeof(float),
+	             texcoords, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, ibo_pos * sizeof(unsigned short),
+	             indices, GL_STATIC_DRAW);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+	hdr->gpu_ssbo_poses    = ssbo;
+	hdr->gpu_vbo_texcoords = vbo;
+	hdr->gpu_ibo           = ibo;
+	hdr->gpu_num_indices   = ibo_pos;
+
+	free(texcoords);
+	free(indices);
+}
+
+/*
+================
 GL_MakeAliasModelDisplayLists
 ================
 */
@@ -380,6 +518,11 @@ void GL_MakeAliasModelDisplayLists (model_t *m, aliashdr_t *hdr)
 		for (j=0 ; j<numorder ; j++)
 			*verts++ = poseverts[i][vertexorder[j]];
 	// Tomaz - Removed ms2 End
+
+	// Phase 1 of GPU alias path: build per-model static GL buffers.
+	// Safe to call here -- no effect on the CPU render path, just adds data
+	// for future shader use.
+	Alias_BuildGPUData (hdr);
 }
 
 /*

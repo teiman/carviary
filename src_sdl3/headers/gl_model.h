@@ -149,6 +149,11 @@ typedef struct msurface_s
 	int			cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
 	qboolean	cached_dlight;				// true if dynamic light in cache
 	byte		*samples;		// [numstyles*surfsize]
+
+	// Static world VBO: pre-triangulated vertex range, valid only for opaque
+	// world surfaces (not sky/turb). Built once at level load.
+	int			vbo_first;   // first vertex in world_static_vbo
+	int			vbo_count;   // triangle vertex count (multiple of 3)
 } msurface_t;
 
 typedef struct mnode_s
@@ -281,6 +286,16 @@ typedef struct
 	int					gl_texturenum[MAX_SKINS][4];
 	int					fb_texturenum[MAX_SKINS][4];
 	int					texels[MAX_SKINS];	// only for player skins
+
+	// GPU side buffers used by the shader-based alias path (Phase 1+).
+	// Built once by Alias_BuildGPUData on first use of the model. Until
+	// then all four fields are 0 and callers must fall back to the CPU
+	// blending path.
+	unsigned int		gpu_ssbo_poses;     // all poses, {byte[3] pos, byte nidx} per vertex
+	unsigned int		gpu_vbo_texcoords;  // per-vertex {float s, t}
+	unsigned int		gpu_ibo;            // triangle list indices (uint16)
+	int					gpu_num_indices;    // 3 * num_triangles
+
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
 

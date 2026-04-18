@@ -68,11 +68,19 @@ warp_vtx_t warp_soup[WARP_MAX_VERTS];
 DynamicVBO warp_vbo;
 static qboolean   warp_vbo_ready = false;
 
+extern "C" void Warp_StreamFrameEnd (void)
+{
+	if (warp_vbo_ready)
+		DynamicVBO_NextFrame(&warp_vbo);
+}
+
 void Warp_EnsureVBO(void)
 {
 	if (warp_vbo_ready) return;
-	// 4x capacity so the streaming ring rarely wraps (see DynamicVBO_UploadStream).
-	DynamicVBO_Init(&warp_vbo, 4 * (GLsizei)sizeof(warp_soup));
+	// Persistent-mapped ring with 3 segments (see DynamicVBO_InitPersistent).
+	// Size = N segments * one per-frame warp_soup worth.
+	DynamicVBO_InitPersistent(&warp_vbo,
+		DYNAMIC_VBO_PERSIST_SEGMENTS * (GLsizei)sizeof(warp_soup));
 	DynamicVBO_SetAttrib(&warp_vbo, 0, 3, GL_FLOAT, GL_FALSE, sizeof(warp_vtx_t), offsetof(warp_vtx_t, x));
 	DynamicVBO_SetAttrib(&warp_vbo, 1, 2, GL_FLOAT, GL_FALSE, sizeof(warp_vtx_t), offsetof(warp_vtx_t, s));
 	warp_vbo_ready = true;
@@ -245,11 +253,9 @@ stays smooth regardless of `gl_subdivide_size`.
 =============
 */
 // Append one water surface's triangulated fan verts to `dst` starting at
-// position `*n_inout`. Clamps to `cap`. Applies r_wave vertical offset per
-// vertex if the cvar is on. Returns how many verts were appended (0 if skipped).
-//
-// This is the CPU-heavy core of water rendering. The GL draw is now issued
-// once per texture from R_DrawWaterSurfaces after the whole soup is built.
+// position `*n_inout`. Clamps to `cap`. Returns how many verts were appended
+// (0 if skipped). Warp motion is applied per-fragment by the world_water
+// shader; vertices here are straight positions.
 int Water_AppendSurface (msurface_t *s, warp_vtx_t *dst, int *n_inout, int cap)
 {
 	int n = *n_inout;
@@ -261,16 +267,14 @@ int Water_AppendSurface (msurface_t *s, warp_vtx_t *dst, int *n_inout, int cap)
 		int nv = p->numverts;
 		if (nv > 256) nv = 256;
 
+		// Warp is computed per-fragment by the world_water shader; we just
+		// pass through positions verbatim.
 		float *v = p->verts[0];
 		for (int i = 0; i < nv; ++i, v += VERTEXSIZE)
 		{
 			fan[i].x = v[0];
 			fan[i].y = v[1];
 			fan[i].z = v[2];
-
-			if (r_wave.value)
-				fan[i].z = v[2] + r_wave.value * sin(v[0]*0.02+realtime) * sin(v[1]*0.02+realtime) * sin(v[2]*0.02+realtime);
-
 			fan[i].s = v[3];
 			fan[i].t = v[4];
 		}

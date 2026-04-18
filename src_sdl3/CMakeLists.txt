@@ -9,7 +9,13 @@ find_package(OpenGL REQUIRED)
 
 file(GLOB SOURCES ${CMAKE_SOURCE_DIR}/*.cpp)
 
-# GLAD loader (OpenGL 3.3 Compatibility)
+# gl_proc.cpp is legacy GLU replacement code (gluScaleImage/Build2DMipmaps).
+# Nothing calls its public API from outside the file, and it references
+# fixed-function enums (GL_LUMINANCE, GL_BITMAP, GL_COLOR_INDEX) that don't
+# exist in a core-profile context. Exclude from the build.
+list(FILTER SOURCES EXCLUDE REGEX ".*/gl_proc\\.cpp$")
+
+# GLAD loader (OpenGL 4.4 Core)
 set(GLAD_SOURCES ${CMAKE_SOURCE_DIR}/third_party/glad/src/glad.c)
 
 add_executable(carviary ${SOURCES} ${GLAD_SOURCES})

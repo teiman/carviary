@@ -279,10 +279,10 @@ void VID_Init (unsigned char *palette)
 	currentHeight = height;
 
 	// ----- SDL GL attributes -----
-	// OpenGL 3.3 Core: no fixed-function fallback. Every draw must go through
-	// a shader + VBO + VAO.
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+	// OpenGL 4.4 Core. Needed for GL_ARB_buffer_storage (persistent mapped
+	// buffers) and for MultiDrawArrays without extensions.
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 4);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
@@ -310,8 +310,8 @@ void VID_Init (unsigned char *palette)
 	if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress))
 		Sys_Error("Failed to load OpenGL via GLAD");
 
-	if (!GLAD_GL_VERSION_3_3)
-		Sys_Error("OpenGL 3.3 not available on this system");
+	if (!GLAD_GL_VERSION_4_4)
+		Sys_Error("OpenGL 4.4 not available on this system");
 
 	// vsync: driven by vid_vsync cvar, can be toggled at runtime.
 	// We read the cvar rather than hardcoding 1 so a saved config with
@@ -362,8 +362,20 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 // =========================================================================
 // GL_EndRendering -- swap buffers
 // =========================================================================
+// Called once per frame to let each streaming VBO place an end-of-frame fence
+// and advance to the next segment of its persistent ring. Implemented in each
+// module that owns a persistent DynamicVBO.
+extern "C" void World_StreamFrameEnd (void);
+extern "C" void Warp_StreamFrameEnd  (void);
+
 void GL_EndRendering (void)
 {
+	// Advance persistent-ring VBOs BEFORE the swap. At this point every draw
+	// that reads from the current segment has been submitted; the fence will
+	// only be signaled after the GPU consumes them.
+	World_StreamFrameEnd();
+	Warp_StreamFrameEnd();
+
 	// Re-apply vsync only when the cvar changes. SetSwapInterval is a
 	// cheap call but we still avoid it every frame for cleanliness.
 	static int last_vsync = -1;

@@ -136,7 +136,6 @@ extern	cvar_t	slowmo;		// Tomaz - Slowmo
 extern  cvar_t  centerfade;		// Tomaz - Fading CenterPrints
 extern  cvar_t  sbar_alpha;		// Tomaz - Sbar Alpha
 extern  cvar_t  con_alpha;		// Tomaz - Console Alpha
-extern  cvar_t  r_wave;			// Tomaz - Water Wave
 extern  cvar_t  gl_glows;		// Tomaz - Glow
 extern  cvar_t  r_bobbing;		// Tomaz - Bobbing Items
 extern  cvar_t  gl_caustics;	// Tomaz - Underwater Caustics

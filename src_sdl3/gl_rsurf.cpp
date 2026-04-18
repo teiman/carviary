@@ -36,17 +36,34 @@ typedef struct {
 static DynamicVBO world_vbo;
 static qboolean   world_vbo_ready = false;
 
+// Static world VBO: every opaque world + brush-entity surface pre-triangulated
+// once at level load. The BSP geometry never changes, so there's no reason to
+// re-upload every frame. Built by R_BuildStaticWorldVBO from R_NewMap.
+static GLuint world_static_vao = 0;
+static GLuint world_static_vbo = 0;
+static int    world_static_ready = 0;
+static int    world_static_nverts = 0;
+
 // Batched world draws emit one glDrawArrays per (texture, lightmap) group.
 // An ad_dm1-sized frame yields ~15-20k post-triangulation verts per texture
 // at peak, so we size for that. 65536 keeps a safe margin.
 #define WORLD_MAX_VERTS 65536
 
+extern "C" void World_StreamFrameEnd (void)
+{
+	if (world_vbo_ready)
+		DynamicVBO_NextFrame(&world_vbo);
+}
+
 static void World_EnsureVBO(void)
 {
 	if (world_vbo_ready) return;
-	// 4x the per-frame soup capacity -- enough ring space that wraps are rare
-	// and GPU never reads a region the CPU is about to overwrite.
-	DynamicVBO_Init(&world_vbo, 4 * WORLD_MAX_VERTS * sizeof(world_vtx_t));
+	// Persistent-mapped ring with 3 segments. Each segment gets one frame's
+	// worth of transient geometry (currently used only by the brush-entity
+	// dynamic path; the static world path goes through world_static_vbo).
+	// Size for WORLD_MAX_VERTS per segment.
+	DynamicVBO_InitPersistent(&world_vbo,
+		DYNAMIC_VBO_PERSIST_SEGMENTS * WORLD_MAX_VERTS * sizeof(world_vtx_t));
 	DynamicVBO_SetAttrib(&world_vbo, 0, 3, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t), offsetof(world_vtx_t, x));
 	DynamicVBO_SetAttrib(&world_vbo, 1, 2, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t), offsetof(world_vtx_t, s));
 	DynamicVBO_SetAttrib(&world_vbo, 2, 2, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t), offsetof(world_vtx_t, lm_s));
@@ -1041,26 +1058,147 @@ typedef struct {
 	texture_t *t;            // diffuse texture + shader selection
 } world_draw_range_t;
 
+// ---------------------------------------------------------------------------
+// R_BuildStaticWorldVBO -- called from R_NewMap. Pre-triangulates every opaque
+// surface of the worldmodel (including brush-entity submodels) and uploads a
+// single GL_STATIC_DRAW buffer. Each msurface stores its vertex range in
+// vbo_first/vbo_count so the render path just emits glDrawArrays -- no per-
+// frame upload, no per-frame triangulation.
+//
+// Sky and SURF_DRAWTURB (water/lava) are skipped: they have their own paths.
+// ---------------------------------------------------------------------------
+static void R_BuildStaticWorldVBO (void)
+{
+	if (!cl.worldmodel) return;
+
+	// Dispose any previous buffer (level reload).
+	if (world_static_vbo) { glDeleteBuffers(1, &world_static_vbo); world_static_vbo = 0; }
+	if (world_static_vao) { glDeleteVertexArrays(1, &world_static_vao); world_static_vao = 0; }
+	world_static_ready = 0;
+	world_static_nverts = 0;
+
+	// Count total triangulated verts needed, mark non-batched surfaces.
+	int total_verts = 0;
+	int batched_surfs = 0;
+	model_t *m = cl.worldmodel;
+	for (int i = 0; i < m->numsurfaces; ++i)
+	{
+		msurface_t *s = &m->surfaces[i];
+		s->vbo_first = 0;
+		s->vbo_count = 0;
+		if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)) continue;
+		glpoly_t *p = s->polys;
+		if (!p) continue;
+		int nv = p->numverts;
+		if (nv < 3) continue;
+		total_verts += (nv - 2) * 3;
+		batched_surfs++;
+	}
+
+	if (total_verts == 0) {
+		Con_Printf("R_BuildStaticWorldVBO: no surfaces to batch\n");
+		return;
+	}
+
+	world_vtx_t *soup = (world_vtx_t *)malloc(total_verts * sizeof(world_vtx_t));
+	if (!soup) {
+		Con_Printf("R_BuildStaticWorldVBO: malloc(%d bytes) failed\n",
+		           (int)(total_verts * sizeof(world_vtx_t)));
+		return;
+	}
+
+	int cursor = 0;
+	for (int i = 0; i < m->numsurfaces; ++i)
+	{
+		msurface_t *s = &m->surfaces[i];
+		if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)) continue;
+		glpoly_t *p = s->polys;
+		if (!p) continue;
+		int nv = p->numverts;
+		if (nv < 3) continue;
+
+		// Build the fan.
+		world_vtx_t fan[256];
+		int take = (nv > 256) ? 256 : nv;
+		float *v = p->verts[0];
+		for (int k = 0; k < take; ++k, v += VERTEXSIZE) {
+			fan[k].x = v[0]; fan[k].y = v[1]; fan[k].z = v[2];
+			fan[k].s = v[3]; fan[k].t = v[4];
+			fan[k].lm_s = v[5]; fan[k].lm_t = v[6];
+		}
+
+		s->vbo_first = cursor;
+		for (int k = 1; k < take - 1; ++k) {
+			soup[cursor++] = fan[0];
+			soup[cursor++] = fan[k];
+			soup[cursor++] = fan[k + 1];
+		}
+		s->vbo_count = cursor - s->vbo_first;
+	}
+
+	// Upload once.
+	glGenVertexArrays(1, &world_static_vao);
+	glGenBuffers(1, &world_static_vbo);
+	glBindVertexArray(world_static_vao);
+	glBindBuffer(GL_ARRAY_BUFFER, world_static_vbo);
+	glBufferData(GL_ARRAY_BUFFER, cursor * sizeof(world_vtx_t), soup, GL_STATIC_DRAW);
+
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t),
+	                      (const void *)offsetof(world_vtx_t, x));
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t),
+	                      (const void *)offsetof(world_vtx_t, s));
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(world_vtx_t),
+	                      (const void *)offsetof(world_vtx_t, lm_s));
+	glBindVertexArray(0);
+
+	free(soup);
+	world_static_nverts = cursor;
+	world_static_ready = 1;
+	Con_Printf("R_BuildStaticWorldVBO: %d verts, %d surfaces, %.2f MB\n",
+	           cursor, batched_surfs,
+	           cursor * sizeof(world_vtx_t) / (1024.0f * 1024.0f));
+}
+
+// Public hook called from R_NewMap.
+void R_OnNewMap_BuildWorldVBO (void)
+{
+	R_BuildStaticWorldVBO();
+}
+
 static void R_EmitTextureChains (void)
 {
 	if (!cl.worldmodel) return;
-	World_EnsureVBO();
+	if (!world_static_ready) return; // R_NewMap didn't run yet; nothing to draw
 
-	// ---- collect phase ----
-	// Build ONE giant vertex buffer for all opaque world surfaces this frame,
-	// and remember the draw ranges. We upload that once and then emit many
-	// glDrawArrays(first, count) calls -- no VBO orphan per batch, no driver
-	// reallocation per texture group. This is the whole win over the
-	// per-surface path.
-	static world_vtx_t world_soup[WORLD_MAX_VERTS];
-	static world_draw_range_t ranges[4096];
-	static world_draw_range_t fb_ranges[4096]; // fullbright pass ranges
-	int nverts = 0;
-	int nranges = 0;
-	int nfb_ranges = 0;
+	// Walk each texture's chain, group surfaces by lightmap page, and emit a
+	// glMultiDrawArrays per (texture, lightmap) group against the static VBO.
+	// No uploads, no triangulation, no CPU soup copies. Each surface keeps
+	// its own (vbo_first, vbo_count) range from R_BuildStaticWorldVBO.
+
+	glBindVertexArray(world_static_vao);
 
 	enum { SURF_BATCH_MAX = 8192 };
 	static msurface_t *surfs[SURF_BATCH_MAX];
+	static GLint      mda_firsts[SURF_BATCH_MAX];
+	static GLsizei    mda_counts[SURF_BATCH_MAX];
+
+	float mvp[16];
+	R_CurrentMVP(mvp);
+
+	texture_t *last_t     = NULL;
+	qboolean   last_fence = false;
+	int        last_lm    = -1;
+
+	// Remember ranges we'll re-emit for fullbright in a second pass.
+	struct fb_batch_t { texture_t *t; int n; };
+	static struct fb_batch_t fb_batches[1024];
+	static GLint   fb_firsts[SURF_BATCH_MAX];
+	static GLsizei fb_counts[SURF_BATCH_MAX];
+	int fb_batch_count = 0;
+	int fb_draw_count  = 0;
 
 	for (int tnum = 0; tnum < cl.worldmodel->numtextures; ++tnum)
 	{
@@ -1068,7 +1206,6 @@ static void R_EmitTextureChains (void)
 		if (!base || !base->texturechain) continue;
 		texture_t *t = base;
 
-		// Gather + sort this texture's surfaces by lightmap page.
 		int nsurfs = 0;
 		for (msurface_t *s = t->texturechain; s && nsurfs < SURF_BATCH_MAX; s = s->texturechain)
 			surfs[nsurfs++] = s;
@@ -1076,89 +1213,11 @@ static void R_EmitTextureChains (void)
 		if (nsurfs == 0) continue;
 		qsort(surfs, nsurfs, sizeof(surfs[0]), cmp_surf_by_lm);
 
-		// Walk lightmap groups within this texture. Also append fullbright
-		// ranges so we can re-emit them in a second pass without rebuilding
-		// the vertex data.
-		int fb_start = -1, fb_count = 0;
-		qboolean wants_fb = (t->fullbrights != -1 && gl_fbr.value);
-
-		int gstart = 0;
-		while (gstart < nsurfs)
-		{
-			int lm = surfs[gstart]->lightmaptexturenum;
-			int gend = gstart + 1;
-			while (gend < nsurfs && surfs[gend]->lightmaptexturenum == lm) gend++;
-
-			int range_first = nverts;
-			for (int i = gstart; i < gend; ++i)
-			{
-				if (nverts + 30 > WORLD_MAX_VERTS) break; // per-surface safety
-				world_vtx_t stagger[128];
-				int add = surf_triangulate(surfs[i], stagger);
-				if (add == 0 || nverts + add > WORLD_MAX_VERTS) break;
-				memcpy(world_soup + nverts, stagger, add * sizeof(world_vtx_t));
-				nverts += add;
-			}
-			int range_count = nverts - range_first;
-			if (range_count > 0 && nranges < 4096)
-			{
-				world_draw_range_t *r = &ranges[nranges++];
-				r->first    = range_first;
-				r->count    = range_count;
-				r->lightmap = lm;
-				r->t        = t;
-
-				if (wants_fb) {
-					if (fb_start < 0) fb_start = range_first;
-					fb_count += range_count;
-				}
-			}
-			gstart = gend;
-		}
-
-		// One merged fullbright range per texture (lightmap binding doesn't
-		// matter for fullbrights, so we don't need to split by lm).
-		if (wants_fb && fb_count > 0 && nfb_ranges < 4096) {
-			world_draw_range_t *r = &fb_ranges[nfb_ranges++];
-			r->first = fb_start;
-			r->count = fb_count;
-			r->lightmap = -1;
-			r->t = t;
-		}
-
-		// Caustics still per-surface: unusual path, very few surfaces normally.
-		if (gl_caustics.value)
-		{
-			for (int i = 0; i < nsurfs; ++i)
-				if (surfs[i]->flags & SURF_UNDERWATER)
-					EmitCausticsPolys(surfs[i]);
-		}
-	}
-
-	if (nverts == 0) return;
-
-	// ---- upload phase: ring-streaming, no orphan stall ----
-	// world_vbo is sized for several frames of geometry; UploadStream writes
-	// at the current head and bumps it, so the GPU can still be reading an
-	// earlier region of the same buffer without forcing a CPU wait.
-	GLsizei byte_offset = DynamicVBO_UploadStream(&world_vbo, world_soup,
-	                                              (GLsizei)(nverts * sizeof(world_vtx_t)));
-	GLsizei vertex_offset = byte_offset / (GLsizei)sizeof(world_vtx_t);
-	DynamicVBO_Bind(&world_vbo);
-
-	float mvp[16];
-	R_CurrentMVP(mvp);
-
-	// ---- emit phase 1: opaque / fence draws ----
-	texture_t *last_t  = NULL;
-	qboolean   last_fence = false;
-	int        last_lm = -1;
-	for (int i = 0; i < nranges; ++i)
-	{
-		world_draw_range_t *r = &ranges[i];
-		texture_t *t = r->t;
 		qboolean fence = t->transparent != 0;
+		qboolean wants_fb = (t->fullbrights != -1 && gl_fbr.value);
+		int fb_this_tex_start = fb_draw_count;
 
+		// Shader/texture bind: only when the texture actually changes.
 		if (t != last_t || fence != last_fence)
 		{
 			if (fence) { if (!R_EnsureWorldFenceShader()) continue; }
@@ -1177,25 +1236,81 @@ static void R_EmitTextureChains (void)
 			glBindTexture(GL_TEXTURE_2D, t->gl_texturenum);
 			last_t = t;
 			last_fence = fence;
-			last_lm = -1; // force lightmap rebind after texture switch
+			last_lm = -1;
 		}
-
-		if (r->lightmap != last_lm)
+		else
 		{
-			upload_lightmap_if_dirty(r->lightmap);
-			glActiveTexture(GL_TEXTURE1);
-			glBindTexture(GL_TEXTURE_2D, lightmap_textures[r->lightmap]);
+			// Shader/texture unchanged (animated textures sharing a base);
+			// still must ensure the diffuse is bound for this frame.
 			glActiveTexture(GL_TEXTURE0);
-			last_lm = r->lightmap;
+			glBindTexture(GL_TEXTURE_2D, t->gl_texturenum);
 		}
 
-		Prof_CountDraw(r->count);
-		glDrawArrays(GL_TRIANGLES, vertex_offset + r->first, r->count);
+		int gstart = 0;
+		while (gstart < nsurfs)
+		{
+			int lm = surfs[gstart]->lightmaptexturenum;
+			int gend = gstart + 1;
+			while (gend < nsurfs && surfs[gend]->lightmaptexturenum == lm) gend++;
+
+			if (lm != last_lm)
+			{
+				upload_lightmap_if_dirty(lm);
+				glActiveTexture(GL_TEXTURE1);
+				glBindTexture(GL_TEXTURE_2D, lightmap_textures[lm]);
+				glActiveTexture(GL_TEXTURE0);
+				last_lm = lm;
+			}
+
+			// Build the firsts[]/counts[] arrays for this (texture, lightmap)
+			// group and emit ONE glMultiDrawArrays -- single driver call for
+			// N surfaces.
+			int n = 0;
+			int total_verts = 0;
+			for (int i = gstart; i < gend && n < SURF_BATCH_MAX; ++i)
+			{
+				msurface_t *s = surfs[i];
+				if (s->vbo_count <= 0) continue; // not batched (shouldn't happen for world opaque)
+				mda_firsts[n] = s->vbo_first;
+				mda_counts[n] = s->vbo_count;
+				n++;
+				total_verts += s->vbo_count;
+
+				if (wants_fb && fb_draw_count < SURF_BATCH_MAX) {
+					fb_firsts[fb_draw_count] = s->vbo_first;
+					fb_counts[fb_draw_count] = s->vbo_count;
+					fb_draw_count++;
+				}
+			}
+			if (n > 0)
+			{
+				Prof_CountDraw(total_verts);
+				glMultiDrawArrays(GL_TRIANGLES, mda_firsts, mda_counts, n);
+			}
+			gstart = gend;
+		}
+
+		if (wants_fb && fb_draw_count > fb_this_tex_start && fb_batch_count < 1024)
+		{
+			fb_batches[fb_batch_count].t = t;
+			fb_batches[fb_batch_count].n = fb_draw_count - fb_this_tex_start;
+			fb_batch_count++;
+		}
+
+		// Caustics still per-surface: unusual path, very few surfaces normally.
+		if (gl_caustics.value)
+		{
+			for (int i = 0; i < nsurfs; ++i)
+				if (surfs[i]->flags & SURF_UNDERWATER)
+					EmitCausticsPolys(surfs[i]);
+		}
 	}
 
-	// ---- emit phase 2: fullbright additive overlays ----
-	if (nfb_ranges > 0 && R_EnsureWorldFullbrightShader())
+	// ---- fullbright pass ----
+	if (fb_batch_count > 0 && R_EnsureWorldFullbrightShader())
 	{
+		glBindVertexArray(world_static_vao);
+
 		GLboolean blend_was_on = glIsEnabled(GL_BLEND);
 		GLint     blend_src, blend_dst;
 		glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend_src);
@@ -1208,23 +1323,25 @@ static void R_EmitTextureChains (void)
 		glUniformMatrix4fv(R_WorldFullbrightShader_u_mvp, 1, GL_FALSE, mvp);
 		glUniform1i(R_WorldFullbrightShader_u_tex, 0);
 
-		texture_t *fb_last_t = NULL;
-		for (int i = 0; i < nfb_ranges; ++i)
+		int draw_cursor = 0;
+		for (int b = 0; b < fb_batch_count; ++b)
 		{
-			world_draw_range_t *r = &fb_ranges[i];
-			if (r->t != fb_last_t)
-			{
-				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, r->t->fullbrights);
-				fb_last_t = r->t;
-			}
-			Prof_CountDraw(r->count);
-			glDrawArrays(GL_TRIANGLES, vertex_offset + r->first, r->count);
+			texture_t *t = fb_batches[b].t;
+			int n = fb_batches[b].n;
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, t->fullbrights);
+			int total_verts = 0;
+			for (int i = 0; i < n; ++i) total_verts += fb_counts[draw_cursor + i];
+			Prof_CountDraw(total_verts);
+			glMultiDrawArrays(GL_TRIANGLES, fb_firsts + draw_cursor, fb_counts + draw_cursor, n);
+			draw_cursor += n;
 		}
 
 		glBlendFunc((GLenum)blend_src, (GLenum)blend_dst);
 		if (!blend_was_on) glDisable(GL_BLEND);
 	}
+
+	glBindVertexArray(0);
 }
 
 /*

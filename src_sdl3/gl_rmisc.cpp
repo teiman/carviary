@@ -101,7 +101,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&centerfade);	// Tomaz - Fading CenterPrints
 	Cvar_RegisterVariable (&sbar_alpha);	// Tomaz - Sbar Alpha
 	Cvar_RegisterVariable (&con_alpha);		// Tomaz - Console Alpha
-	Cvar_RegisterVariable (&r_wave);		// Tomaz - Water Wave
 	Cvar_RegisterVariable (&gl_glows);		// Tomaz - Glow
 	Cvar_RegisterVariable (&r_bobbing);		// Tomaz - Bobbing Items
 	Cvar_RegisterVariable (&gl_caustics);	// Tomaz - Underwater Caustics
@@ -226,6 +225,8 @@ void R_TranslatePlayerSkin (int playernum)
 R_NewMap
 ===============
 */
+extern void R_OnNewMap_BuildWorldVBO (void);
+
 void R_NewMap (void)
 {
 	int		i;
@@ -241,13 +242,18 @@ void R_NewMap (void)
 // FIXME: is this one short?
 	for (i=0 ; i<cl.worldmodel->numleafs ; i++)
 		cl.worldmodel->leafs[i].efrags = NULL;
-		 	
+
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 
 	r_dlightframecount = 0;
 
 	GL_BuildLightmaps ();
+
+	// Static world VBO: must be built AFTER GL_BuildLightmaps because that
+	// assigns lightmap coords (s->light_s/t) into each surface's poly verts,
+	// which we copy into the static VBO.
+	R_OnNewMap_BuildWorldVBO();
 
 	SHOWLMP_clear();	// Tomaz - Show Hide LMP
 }

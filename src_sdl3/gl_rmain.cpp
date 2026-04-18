@@ -88,7 +88,6 @@ cvar_t	gl_doubleeyes		= {"gl_doubleeys", "1"};
 cvar_t	centerfade			= {"centerfade", "0", true};	// Tomaz - Fading CenterPrints
 cvar_t	sbar_alpha			= {"sbar_alpha", "1", true};	// Tomaz - Sbar Alpha
 cvar_t	con_alpha			= {"con_alpha", "0.5", true};	// Tomaz - Console Alpha
-cvar_t	r_wave				= {"r_wave", "0", true};		// Tomaz - Water Wave
 cvar_t	gl_glows			= {"gl_glows", "1", true};		// Tomaz - Glow
 cvar_t	r_bobbing			= {"r_bobbing", "1", true};		// Tomaz - Bobbing Items
 cvar_t	gl_caustics			= {"gl_caustics", "0", true};	// Tomaz - Underwater Caustics

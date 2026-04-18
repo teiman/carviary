@@ -674,7 +674,7 @@ Misc Menu
 */
 
 int		misc_cursor;
-#define	MISC_ITEMS	9
+#define	MISC_ITEMS	8
 
 void M_Menu_Misc_f ()
 {
@@ -715,25 +715,14 @@ void M_MiscAdjustSliders (int dir)
 		Cvar_SetValue ("r_bobbing", !r_bobbing.value);
 		break;
 
-	case 7:	// Wavesize
-		r_wave.value += dir * 1.0f;
-		if (r_wave.value < 0.0f)
-			r_wave.value = 0.0f;
-		if (r_wave.value > 20.0f)
-			r_wave.value = 20.0f;
-		Cvar_SetValue ("r_wave", r_wave.value);
-		break;
-
-	case 8:// MapShots
+	case 7:	// MapShots
 		Cvar_SetValue ("mapshots", !mapshots.value);
 		break;
 	}
 }
 
-void M_Misc_Draw () 
+void M_Misc_Draw ()
 {
-	float	r;
-
 	M_Print (16, 32, "       Improved Aiming");
 	M_DrawCheckbox (220, 32, impaim.value);
 
@@ -755,12 +744,8 @@ void M_Misc_Draw ()
 	M_Print (16, 80, "         Bobbing Items");
 	M_DrawCheckbox (220, 80, r_bobbing.value);
 
-	M_Print (16, 88, "             Wave Size");
-	r = r_wave.value * 0.05;	// Tomaz - Speed
-	M_DrawSlider (220, 88, r);
-
-	M_Print (16, 96, "              MapShots");
-	M_DrawCheckbox (220, 96, mapshots.value);
+	M_Print (16, 88, "              MapShots");
+	M_DrawCheckbox (220, 88, mapshots.value);
 
 	M_DrawCharacter (200, 32 + misc_cursor*8, 12+((int)(realtime*4)&1));
 }
