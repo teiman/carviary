@@ -245,7 +245,64 @@ void Con_Init (void)
 	Cmd_AddCommand ("messagemode", Con_MessageMode_f);
 	Cmd_AddCommand ("messagemode2", Con_MessageMode2_f);
 	Cmd_AddCommand ("clear", Con_Clear_f);
+	extern void Con_Dump_f (void);
+	Cmd_AddCommand ("condump", Con_Dump_f);
 	con_initialized = true;
+}
+
+/*
+==================
+Con_Dump_f
+
+Dumps the visible console buffer to a plain-text file in the carviary
+working directory. Usage: condump <name>  -> writes <name>.txt
+==================
+*/
+void Con_Dump_f (void)
+{
+	if (Cmd_Argc() != 2) {
+		Con_Printf ("usage: condump <name>\n");
+		return;
+	}
+	if (!con_text) return;
+
+	char path[256];
+	snprintf (path, sizeof(path), "%s.txt", Cmd_Argv(1));
+
+	FILE *f = fopen (path, "w");
+	if (!f) {
+		Con_Printf ("condump: cannot open '%s'\n", path);
+		return;
+	}
+
+	// Walk oldest -> newest. `con_current` points at the line being
+	// written to; the oldest line in the ring is (con_current + 1) %
+	// con_totallines. Skip leading all-blank lines so the file isn't
+	// padded with empty space before the boot banner.
+	int wrote = 0;
+	qboolean seen_text = false;
+	for (int i = 1; i <= con_totallines; ++i) {
+		int row = (con_current + i) % con_totallines;
+		char *line = con_text + row * con_linewidth;
+
+		// Trim trailing spaces + color bit (0x80).
+		int end = con_linewidth;
+		while (end > 0 && (line[end - 1] & 0x7f) == ' ') end--;
+
+		if (!seen_text) {
+			if (end == 0) continue;
+			seen_text = true;
+		}
+
+		for (int k = 0; k < end; ++k) {
+			unsigned char c = (unsigned char)(line[k] & 0x7f);
+			fputc (c >= 32 ? c : ' ', f);
+		}
+		fputc ('\n', f);
+		wrote++;
+	}
+	fclose (f);
+	Con_Printf ("condump: wrote %d line(s) to '%s'\n", wrote, path);
 }
 
 

@@ -716,7 +716,14 @@ static void Grass_BuildBlades (int tex_index)
 static void Grass_EnsureTexData (void)
 {
 	if (!cl.worldmodel) return;
-	if (grass_tex_data && grass_tex_data_count == cl.worldmodel->numtextures) return;
+	// Key on (worldmodel pointer, numtextures). The pointer is stable for a
+	// map's lifetime; re-keying on numtextures alone could, in theory, match
+	// a different world that happens to share texture count.
+	static model_t *grass_last_worldmodel = NULL;
+	if (grass_tex_data
+	    && grass_last_worldmodel == cl.worldmodel
+	    && grass_tex_data_count == cl.worldmodel->numtextures)
+		return;
 
 	// Free existing buffers first.
 	if (grass_tex_data) {
@@ -728,6 +735,7 @@ static void Grass_EnsureTexData (void)
 	}
 	grass_tex_data_count = cl.worldmodel->numtextures;
 	grass_tex_data = (grass_tex_data_t *)calloc(grass_tex_data_count, sizeof(grass_tex_data_t));
+	grass_last_worldmodel = cl.worldmodel;
 }
 
 // Public: called from R_EmitTextureChains as a second pass, after the base

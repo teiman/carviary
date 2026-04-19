@@ -851,6 +851,9 @@ void R_RenderScene (void)
 
 	R_SetupFrame ();
 
+	extern void Lamp_Update (void);
+	Lamp_Update ();
+
 	R_PushDlights ();
 
 	R_SetFrustum ();

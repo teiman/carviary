@@ -244,6 +244,80 @@ void CL_NextDemo (void)
 
 /*
 ==============
+CL_Lightstyle_f
+
+Inspect / override lightstyle channels locally (client only). The server
+will overwrite the channel on the next svc_lightstyle update, so this is
+purely a debug/visualization tool.
+
+  lightstyle                -> print usage
+  lightstyle show           -> list every non-empty style
+  lightstyle <n> <string>   -> set style <n> to <string> (letters 'a'..'z')
+==============
+*/
+void CL_Lightstyle_f (void)
+{
+	int argc = Cmd_Argc();
+	if (argc < 2) {
+		Con_Printf ("usage:\n");
+		Con_Printf ("  lightstyle show            list current lightstyles\n");
+		Con_Printf ("  lightstyle <n> <string>    set style <n> (0..%d) to <string>\n", MAX_LIGHTSTYLES - 1);
+		Con_Printf ("examples:\n");
+		Con_Printf ("  lightstyle 0 z             channel 0 full bright\n");
+		Con_Printf ("  lightstyle 0 a             channel 0 pitch black\n");
+		Con_Printf ("  lightstyle 1 mamamamabama  flicker\n");
+		Con_Printf ("  lightstyle 2 abcdefghijklmnopqrrqponmlkjihgfedcba  slow pulse\n");
+		return;
+	}
+
+	if (!Q_strcasecmp(Cmd_Argv(1), "show")) {
+		int shown = 0;
+		for (int i = 0; i < MAX_LIGHTSTYLES; ++i) {
+			if (cl_lightstyle[i].length <= 0) continue;
+			Con_Printf ("  %2d: \"%s\"\n", i, cl_lightstyle[i].map);
+			shown++;
+		}
+		if (shown == 0) Con_Printf ("(no lightstyles set)\n");
+		else            Con_Printf ("%d style(s)\n", shown);
+		return;
+	}
+
+	if (argc != 3) {
+		Con_Printf ("usage: lightstyle <n> <string>  (run `lightstyle` alone for help)\n");
+		return;
+	}
+
+	int n = Q_atoi (Cmd_Argv(1));
+	if (n < 0 || n >= MAX_LIGHTSTYLES) {
+		Con_Printf ("lightstyle: channel %d out of range (0..%d)\n", n, MAX_LIGHTSTYLES - 1);
+		return;
+	}
+
+	const char *src = Cmd_Argv(2);
+	int len = (int)strlen(src);
+	if (len <= 0) {
+		Con_Printf ("lightstyle: empty string; use e.g. \"m\" for normal\n");
+		return;
+	}
+	if (len >= MAX_STYLESTRING) {
+		Con_Printf ("lightstyle: string too long (max %d)\n", MAX_STYLESTRING - 1);
+		return;
+	}
+	for (int k = 0; k < len; ++k) {
+		char c = src[k];
+		if (c < 'a' || c > 'z') {
+			Con_Printf ("lightstyle: only lowercase 'a'..'z' accepted (got '%c')\n", c);
+			return;
+		}
+	}
+
+	Q_strcpy (cl_lightstyle[n].map, (char *)src);
+	cl_lightstyle[n].length = len;
+	Con_Printf ("lightstyle %d = \"%s\"\n", n, src);
+}
+
+/*
+==============
 CL_PrintEntities_f
 ==============
 */
@@ -279,7 +353,14 @@ dlight_t *CL_AllocDlight (int key)
 // tarbaby explosion, etc.) overwrite dl->color[] after the Alloc. Leaving
 // the default at (1, 0.5, 0.25) meant every caller that forgot -- muzzleflash,
 // rocket explosion, EXPLOSION2 -- painted the walls orange.
-#define DLIGHT_DEFAULT_COLOR() do { dl->color[0] = 1; dl->color[1] = 1; dl->color[2] = 1; } while (0)
+// Initialize color white and cone in omnidirectional mode (cone_outer > 1
+// means every direction is inside the cone, so the angular falloff in
+// R_AddDynamicLights collapses to 1.0 everywhere).
+#define DLIGHT_DEFAULT_COLOR() do { \
+	dl->color[0] = 1; dl->color[1] = 1; dl->color[2] = 1; \
+	dl->cone_outer = 2.0f; dl->cone_inner = 2.0f; \
+	dl->cone_dir[0] = 0; dl->cone_dir[1] = 0; dl->cone_dir[2] = 1; \
+} while (0)
 
 // first look for an exact key match
 	if (key)
@@ -768,5 +849,6 @@ void CL_Init (void)
 	Cmd_AddCommand ("playprofile", CL_PlayProfile_f);
 	Cmd_AddCommand ("profile_live_start", CL_ProfileLiveStart_f);
 	Cmd_AddCommand ("profile_live_stop", CL_ProfileLiveStop_f);
+	Cmd_AddCommand ("lightstyle", CL_Lightstyle_f);
 }
 

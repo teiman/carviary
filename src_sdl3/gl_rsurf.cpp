@@ -117,18 +117,18 @@ void R_AddDynamicLights (msurface_t *surf)
 		if ( !(surf->dlightbits & (1<<lnum) ) )
 			continue;		// not lit by this light
 
-		rad = cl_dlights[lnum].radius;
-		dist = PlaneDiff (cl_dlights[lnum].origin, surf->plane);
+		dlight_t *dl = &cl_dlights[lnum];
+		rad = dl->radius;
+		dist = PlaneDiff (dl->origin, surf->plane);
 		rad -= fabs(dist);
-		minlight = cl_dlights[lnum].minlight;
+		minlight = dl->minlight;
 		if (rad < minlight)
 			continue;
 		minlight = rad - minlight;
 
 		for (i=0 ; i<3 ; i++)
 		{
-			impact[i] = cl_dlights[lnum].origin[i] -
-					surf->plane->normal[i]*dist;
+			impact[i] = dl->origin[i] - surf->plane->normal[i]*dist;
 		}
 
 		local[0] = DotProduct (impact, tex->vecs[0]) + tex->vecs[0][3];
@@ -139,10 +139,61 @@ void R_AddDynamicLights (msurface_t *surf)
 
 		// Tomaz - Lit Support Begin
 		bl		= blocklights;
-		cred	= (int)(cl_dlights[lnum].color[0] * 256.0f);
-		cgreen	= (int)(cl_dlights[lnum].color[1] * 256.0f);
-		cblue	= (int)(cl_dlights[lnum].color[2] * 256.0f);
-		// Tomaz - Lit Support End	
+		cred	= (int)(dl->color[0] * 256.0f);
+		cgreen	= (int)(dl->color[1] * 256.0f);
+		cblue	= (int)(dl->color[2] * 256.0f);
+		// Tomaz - Lit Support End
+
+		// Spotlight cone setup. We need per-luxel gating because BSP
+		// surfaces (especially floors) are routinely larger than the
+		// cone footprint, so a single per-surface test either lights
+		// the whole floor or none of it.
+		//
+		// Reconstruct each luxel's world position as:
+		//   P(s,t) = origin_world + s_step * s  +  t_step * t
+		// where s_step/t_step are texinfo's s/t axes projected onto the
+		// surface plane (remove the normal component so we walk along
+		// the surface, not off it) and scaled so one (s,t) unit = 16
+		// world units.
+		qboolean cone_on = (dl->cone_outer <= 1.0f);
+		vec3_t s_step, t_step, origin_world;
+		float cone_denom = dl->cone_inner - dl->cone_outer;
+		if (cone_denom < 1e-4f) cone_denom = 1e-4f;
+		if (cone_on) {
+			// Project tex axes onto the plane.
+			float *n = surf->plane->normal;
+			float ds_n = DotProduct(tex->vecs[0], n);
+			float dt_n = DotProduct(tex->vecs[1], n);
+			vec3_t sp, tp;
+			for (i = 0; i < 3; ++i) {
+				sp[i] = tex->vecs[0][i] - n[i] * ds_n;
+				tp[i] = tex->vecs[1][i] - n[i] * dt_n;
+			}
+			// texinfo's s axis produces texels-per-world-unit. After
+			// projecting, |sp| ~= 1 (a unit world step along s). We
+			// want one (s,t) luxel = 16 world units, so multiply by 16.
+			float sp_len2 = DotProduct(sp, sp);
+			float tp_len2 = DotProduct(tp, tp);
+			float sp_inv = sp_len2 > 1e-8f ? 1.0f / sp_len2 : 0.0f;
+			float tp_inv = tp_len2 > 1e-8f ? 1.0f / tp_len2 : 0.0f;
+			// sp points in the world direction where (sp . tex->vecs[0])
+			// increases by 1 per unit texel; we want world motion per
+			// luxel (16 texels), so sp * 16 / |sp|^2 gives that.
+			for (i = 0; i < 3; ++i) {
+				s_step[i] = sp[i] * 16.0f * sp_inv;
+				t_step[i] = tp[i] * 16.0f * tp_inv;
+			}
+			// World origin of the (s=0, t=0) luxel corner. The texinfo
+			// projection puts impact at world position corresponding to
+			// texel coords (local[0] + surf->texturemins[0],
+			//                local[1] + surf->texturemins[1]), so walk
+			// back from impact by (local[0]/16, local[1]/16) luxels.
+			float s0 = local[0] / 16.0f;
+			float t0 = local[1] / 16.0f;
+			for (i = 0; i < 3; ++i) {
+				origin_world[i] = impact[i] - s_step[i]*s0 - t_step[i]*t0;
+			}
+		}
 
 		for (t = 0 ; t<tmax ; t++)
 		{
@@ -159,15 +210,40 @@ void R_AddDynamicLights (msurface_t *surf)
 				else
 					dist = td + (sd>>1);
 				if (dist < minlight)
-				// Tomaz - Lit Support Begin
 				{
 					brightness = rad - dist;
+
+					if (cone_on) {
+						float px = origin_world[0] + s_step[0]*s + t_step[0]*t;
+						float py = origin_world[1] + s_step[1]*s + t_step[1]*t;
+						float pz = origin_world[2] + s_step[2]*s + t_step[2]*t;
+						float dx = px - dl->origin[0];
+						float dy = py - dl->origin[1];
+						float dz = pz - dl->origin[2];
+						float l2 = dx*dx + dy*dy + dz*dz;
+						if (l2 > 1e-4f) {
+							float inv = 1.0f / sqrtf(l2);
+							float cdot = (dx*dl->cone_dir[0]
+							            + dy*dl->cone_dir[1]
+							            + dz*dl->cone_dir[2]) * inv;
+							float k;
+							if      (cdot <= dl->cone_outer) k = 0.0f;
+							else if (cdot >= dl->cone_inner) k = 1.0f;
+							else {
+								k = (cdot - dl->cone_outer) / cone_denom;
+								k = k * k * (3.0f - 2.0f * k);
+							}
+							brightness = (int)(brightness * k);
+						} else {
+							brightness = 0;
+						}
+					}
+
 					bl[0] += brightness * cred;
 					bl[1] += brightness * cgreen;
 					bl[2] += brightness * cblue;
 				}
 				bl += 3;
-				// Tomaz - Lit Support End
 			}
 		}
 	}
@@ -743,7 +819,7 @@ void R_DrawWaterSurfaces (void)
 
 float	r_world_matrix[16];
 
-static void R_EmitTextureChains (void); // forward decl; def below
+static void R_EmitTextureChains (model_t *texmodel); // forward decl; def below
 
 /*
 =================
@@ -863,7 +939,9 @@ void R_SetupBrushPolys (entity_t *e)
 	// Emit batched opaque draws for this entity, then pop its transform.
 	// R_EmitTextureChains reads MVP from the matrix stack, so the entity's
 	// translation/rotation we just pushed is applied to the draws.
-	R_EmitTextureChains ();
+	// External brush models (b_shell0.bsp etc.) have their own textures[]
+	// arrays -- we iterate those so their chains actually get drawn.
+	R_EmitTextureChains (clmodel);
 
 	MatStack_Pop(&r_modelview);
 }
@@ -1077,22 +1155,44 @@ static void R_BuildStaticWorldVBO (void)
 	world_static_ready = 0;
 	world_static_nverts = 0;
 
+	// Enumerate every distinct brush-model surface array we need to batch.
+	// - The worldmodel owns the master array; its own inline submodels (`*N`)
+	//   point into it, so we skip those to avoid double-counting.
+	// - External BSPs (b_shell0.bsp, b_nail0.bsp, b_explob.bsp, ...) have
+	//   their own surfaces[] arrays. Without this, their surfaces get
+	//   vbo_count=0 and R_EmitTextureChains silently drops them -- that is
+	//   what made ammo/health boxes invisible.
+	model_t *models[MAX_MODELS];
+	int      num_models = 0;
+	models[num_models++] = cl.worldmodel;
+	for (int j = 1; j < MAX_MODELS; ++j) {
+		model_t *mp = cl.model_precache[j];
+		if (!mp) break;
+		if (mp == cl.worldmodel) continue;
+		if (mp->type != mod_brush) continue;
+		if (mp->name[0] == '*') continue; // inline submodel: shares worldmodel surfaces
+		models[num_models++] = mp;
+	}
+
 	// Count total triangulated verts needed, mark non-batched surfaces.
 	int total_verts = 0;
 	int batched_surfs = 0;
-	model_t *m = cl.worldmodel;
-	for (int i = 0; i < m->numsurfaces; ++i)
+	for (int mi = 0; mi < num_models; ++mi)
 	{
-		msurface_t *s = &m->surfaces[i];
-		s->vbo_first = 0;
-		s->vbo_count = 0;
-		if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)) continue;
-		glpoly_t *p = s->polys;
-		if (!p) continue;
-		int nv = p->numverts;
-		if (nv < 3) continue;
-		total_verts += (nv - 2) * 3;
-		batched_surfs++;
+		model_t *m = models[mi];
+		for (int i = 0; i < m->numsurfaces; ++i)
+		{
+			msurface_t *s = &m->surfaces[i];
+			s->vbo_first = 0;
+			s->vbo_count = 0;
+			if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)) continue;
+			glpoly_t *p = s->polys;
+			if (!p) continue;
+			int nv = p->numverts;
+			if (nv < 3) continue;
+			total_verts += (nv - 2) * 3;
+			batched_surfs++;
+		}
 	}
 
 	if (total_verts == 0) {
@@ -1108,32 +1208,36 @@ static void R_BuildStaticWorldVBO (void)
 	}
 
 	int cursor = 0;
-	for (int i = 0; i < m->numsurfaces; ++i)
+	for (int mi = 0; mi < num_models; ++mi)
 	{
-		msurface_t *s = &m->surfaces[i];
-		if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)) continue;
-		glpoly_t *p = s->polys;
-		if (!p) continue;
-		int nv = p->numverts;
-		if (nv < 3) continue;
+		model_t *m = models[mi];
+		for (int i = 0; i < m->numsurfaces; ++i)
+		{
+			msurface_t *s = &m->surfaces[i];
+			if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)) continue;
+			glpoly_t *p = s->polys;
+			if (!p) continue;
+			int nv = p->numverts;
+			if (nv < 3) continue;
 
-		// Build the fan.
-		world_vtx_t fan[256];
-		int take = (nv > 256) ? 256 : nv;
-		float *v = p->verts[0];
-		for (int k = 0; k < take; ++k, v += VERTEXSIZE) {
-			fan[k].x = v[0]; fan[k].y = v[1]; fan[k].z = v[2];
-			fan[k].s = v[3]; fan[k].t = v[4];
-			fan[k].lm_s = v[5]; fan[k].lm_t = v[6];
-		}
+			// Build the fan.
+			world_vtx_t fan[256];
+			int take = (nv > 256) ? 256 : nv;
+			float *v = p->verts[0];
+			for (int k = 0; k < take; ++k, v += VERTEXSIZE) {
+				fan[k].x = v[0]; fan[k].y = v[1]; fan[k].z = v[2];
+				fan[k].s = v[3]; fan[k].t = v[4];
+				fan[k].lm_s = v[5]; fan[k].lm_t = v[6];
+			}
 
-		s->vbo_first = cursor;
-		for (int k = 1; k < take - 1; ++k) {
-			soup[cursor++] = fan[0];
-			soup[cursor++] = fan[k];
-			soup[cursor++] = fan[k + 1];
+			s->vbo_first = cursor;
+			for (int k = 1; k < take - 1; ++k) {
+				soup[cursor++] = fan[0];
+				soup[cursor++] = fan[k];
+				soup[cursor++] = fan[k + 1];
+			}
+			s->vbo_count = cursor - s->vbo_first;
 		}
-		s->vbo_count = cursor - s->vbo_first;
 	}
 
 	// Upload once.
@@ -1168,10 +1272,11 @@ void R_OnNewMap_BuildWorldVBO (void)
 	R_BuildStaticWorldVBO();
 }
 
-static void R_EmitTextureChains (void)
+static void R_EmitTextureChains (model_t *texmodel)
 {
 	if (!cl.worldmodel) return;
 	if (!world_static_ready) return; // R_NewMap didn't run yet; nothing to draw
+	if (!texmodel) texmodel = cl.worldmodel;
 
 	// Walk each texture's chain, group surfaces by lightmap page, and emit a
 	// glMultiDrawArrays per (texture, lightmap) group against the static VBO.
@@ -1200,9 +1305,9 @@ static void R_EmitTextureChains (void)
 	int fb_batch_count = 0;
 	int fb_draw_count  = 0;
 
-	for (int tnum = 0; tnum < cl.worldmodel->numtextures; ++tnum)
+	for (int tnum = 0; tnum < texmodel->numtextures; ++tnum)
 	{
-		texture_t *base = cl.worldmodel->textures[tnum];
+		texture_t *base = texmodel->textures[tnum];
 		if (!base || !base->texturechain) continue;
 		texture_t *t = base;
 
@@ -1327,12 +1432,6 @@ static void R_EmitTextureChains (void)
 		}
 	}
 
-	// ---- grass blades pass (iteration 2 of the grow_grass experiment) ----
-	// Drawn after the base surfaces so the blades occlude and depth-test
-	// normally against everything else. Skipped entirely when no texture is
-	// marked.
-	Grass_DrawBlades();
-
 	// ---- fullbright pass ----
 	if (fb_batch_count > 0 && R_EnsureWorldFullbrightShader())
 	{
@@ -1397,7 +1496,12 @@ void R_DrawWorld (void)
 	// Emit one draw per (texture, lightmap) group, batching the many per-
 	// surface draws the old path produced. This is the whole point of the
 	// batching refactor.
-	R_EmitTextureChains ();
+	R_EmitTextureChains (cl.worldmodel);
+
+	// Grass blades (iteration 2). World-only: must not run inside brush-
+	// entity draws, or each visible brush entity would re-emit the full
+	// blade VBO under its transform.
+	Grass_DrawBlades();
 
 	if (skychain)
 	{

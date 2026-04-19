@@ -125,6 +125,10 @@ void R_Init (void)
 	// Grass experiment: register console commands. Shader is built on-demand.
 	Grass_Init();
 
+	// Flashlight ("lamp on" / "lamp off").
+	extern void Lamp_Init (void);
+	Lamp_Init();
+
 	Prof_Init ();
 }
 

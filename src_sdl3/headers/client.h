@@ -77,6 +77,12 @@ typedef struct dlight_s
 	float	minlight;			// don't add when contributing less
 	int		key;
 	float	color[3];			// Tomaz - Lit Support
+	// Optional spotlight cone. When cone_outer >= 1.0 the light is treated
+	// as fully omnidirectional (default); R_AllocDlight/CL_AllocDlight must
+	// init cone_outer to 2.0f for back-compat.
+	vec3_t	cone_dir;           // unit vector, forward of the cone
+	float	cone_inner;         // cos of inner angle (full brightness)
+	float	cone_outer;         // cos of outer angle (zero brightness)
 } dlight_t;
 
 
