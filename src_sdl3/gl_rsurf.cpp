@@ -1188,9 +1188,9 @@ static void R_EmitTextureChains (void)
 	float mvp[16];
 	R_CurrentMVP(mvp);
 
-	texture_t *last_t     = NULL;
-	qboolean   last_fence = false;
-	int        last_lm    = -1;
+	texture_t *last_t            = NULL;
+	int        last_shader_kind  = -1; // 0=opaque, 1=fence, 2=grass
+	int        last_lm           = -1;
 
 	// Remember ranges we'll re-emit for fullbright in a second pass.
 	struct fb_batch_t { texture_t *t; int n; };
@@ -1213,20 +1213,41 @@ static void R_EmitTextureChains (void)
 		if (nsurfs == 0) continue;
 		qsort(surfs, nsurfs, sizeof(surfs[0]), cmp_surf_by_lm);
 
-		qboolean fence = t->transparent != 0;
+		qboolean fence    = t->transparent != 0;
+		qboolean grass    = t->grass != 0 && !fence; // grass path doesn't apply to fence textures
 		qboolean wants_fb = (t->fullbrights != -1 && gl_fbr.value);
 		int fb_this_tex_start = fb_draw_count;
 
-		// Shader/texture bind: only when the texture actually changes.
-		if (t != last_t || fence != last_fence)
+		// Shader/texture bind: only when the texture OR the shader kind changes.
+		// Three kinds share the same world vertex layout so switching between
+		// them is just a shader bind + uniform setup, no VAO change.
+		int shader_kind = grass ? 2 : (fence ? 1 : 0);
+		if (t != last_t || shader_kind != last_shader_kind)
 		{
-			if (fence) { if (!R_EnsureWorldFenceShader()) continue; }
-			else       { if (!R_EnsureWorldOpaqueShader()) continue; }
-			GLShader *sh = fence ? &R_WorldFenceShader : &R_WorldOpaqueShader;
-			GLint u_mvp = fence ? R_WorldFenceShader_u_mvp : R_WorldOpaqueShader_u_mvp;
-			GLint u_tex = fence ? R_WorldFenceShader_u_tex : R_WorldOpaqueShader_u_tex;
-			GLint u_lm  = fence ? R_WorldFenceShader_u_lightmap : R_WorldOpaqueShader_u_lightmap;
-			GLint u_a   = fence ? R_WorldFenceShader_u_alpha : R_WorldOpaqueShader_u_alpha;
+			GLShader *sh;
+			GLint u_mvp, u_tex, u_lm, u_a;
+			if (grass) {
+				if (!R_EnsureWorldGrassShader()) continue;
+				sh    = &R_WorldGrassShader;
+				u_mvp = R_WorldGrassShader_u_mvp;
+				u_tex = R_WorldGrassShader_u_tex;
+				u_lm  = R_WorldGrassShader_u_lightmap;
+				u_a   = R_WorldGrassShader_u_alpha;
+			} else if (fence) {
+				if (!R_EnsureWorldFenceShader()) continue;
+				sh    = &R_WorldFenceShader;
+				u_mvp = R_WorldFenceShader_u_mvp;
+				u_tex = R_WorldFenceShader_u_tex;
+				u_lm  = R_WorldFenceShader_u_lightmap;
+				u_a   = R_WorldFenceShader_u_alpha;
+			} else {
+				if (!R_EnsureWorldOpaqueShader()) continue;
+				sh    = &R_WorldOpaqueShader;
+				u_mvp = R_WorldOpaqueShader_u_mvp;
+				u_tex = R_WorldOpaqueShader_u_tex;
+				u_lm  = R_WorldOpaqueShader_u_lightmap;
+				u_a   = R_WorldOpaqueShader_u_alpha;
+			}
 			GLShader_Use(sh);
 			glUniformMatrix4fv(u_mvp, 1, GL_FALSE, mvp);
 			glUniform1i(u_tex, 0);
@@ -1235,7 +1256,7 @@ static void R_EmitTextureChains (void)
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, t->gl_texturenum);
 			last_t = t;
-			last_fence = fence;
+			last_shader_kind = shader_kind;
 			last_lm = -1;
 		}
 		else
@@ -1305,6 +1326,12 @@ static void R_EmitTextureChains (void)
 					EmitCausticsPolys(surfs[i]);
 		}
 	}
+
+	// ---- grass blades pass (iteration 2 of the grow_grass experiment) ----
+	// Drawn after the base surfaces so the blades occlude and depth-test
+	// normally against everything else. Skipped entirely when no texture is
+	// marked.
+	Grass_DrawBlades();
 
 	// ---- fullbright pass ----
 	if (fb_batch_count > 0 && R_EnsureWorldFullbrightShader())

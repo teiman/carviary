@@ -84,6 +84,7 @@ typedef struct texture_s
 	int					fullbrights;		// Tomaz - Fullbrights
 	int					transparent;		// Tomaz - HL Bsp's
 	struct msurface_s	*texturechain;		// head of per-frame surface chain (world batching)
+	byte				grass;				// 1 if this texture is marked as grass (grow_grass)
 } texture_t;
 
 #define	SURF_PLANEBACK		2

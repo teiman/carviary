@@ -122,6 +122,9 @@ void R_Init (void)
 	// rather than the first time an entity is drawn.
 	R_EnsureAliasShader();
 
+	// Grass experiment: register console commands. Shader is built on-demand.
+	Grass_Init();
+
 	Prof_Init ();
 }
 
@@ -259,6 +262,10 @@ void R_NewMap (void)
 	// assigns lightmap coords (s->light_s/t) into each surface's poly verts,
 	// which we copy into the static VBO.
 	R_OnNewMap_BuildWorldVBO();
+
+	// Auto-grass: mark configured textures so they get the grass shader
+	// without needing a manual grow_grass command.
+	Grass_OnNewMap();
 
 	SHOWLMP_clear();	// Tomaz - Show Hide LMP
 }

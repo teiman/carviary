@@ -1,0 +1,103 @@
+# grass debug dump for 'maps/e1m1.bsp'
+# columns: surf_idx tex verts area bbox_min bbox_max blades
+surf  2598 ground1_6        verts= 4 area=    3840 bbox=(   192,  1776,  -224)-(   272,  1824,  -224) blades= 285
+surf  2606 ground1_6        verts= 4 area=    3840 bbox=(   -16,  1776,  -224)-(    64,  1824,  -224) blades= 751
+surf  3489 ground1_6        verts= 4 area=     512 bbox=(   -80,  1648,  -224)-(   -48,  1680,  -224) blades=  50
+surf  3490 ground1_6        verts= 6 area=    6656 bbox=(   -48,  1648,  -224)-(    64,  1712,  -224) blades= 679
+surf  3491 ground1_6        verts= 5 area=    8192 bbox=(    64,  1648,  -224)-(   192,  1712,  -224) blades=1178
+surf  3492 ground1_6        verts= 7 area=    3072 bbox=(   192,  1648,  -224)-(   384,  1664,  -224) blades= 488
+surf  3493 ground1_6        verts= 5 area=    4608 bbox=(   192,  1664,  -224)-(   288,  1712,  -224) blades= 780
+surf  3494 ground1_6        verts= 3 area=     512 bbox=(   288,  1664,  -224)-(   320,  1696,  -224) blades=  49
+surf  3495 ground1_6        verts= 4 area=    1024 bbox=(   384,  1648,  -224)-(   416,  1696,  -224) blades= 183
+surf  3496 ground1_6        verts= 7 area=   14336 bbox=(   416,  1648,  -224)-(   640,  1712,  -224) blades=2271
+surf  3497 ground1_6        verts= 4 area=    5120 bbox=(   640,  1648,  -224)-(   720,  1712,  -224) blades= 547
+surf  3498 ground1_6        verts= 6 area=    1264 bbox=(   592,  1712,  -224)-(   720,  1728,  -224) blades= 159
+surf  3603 ground1_6        verts= 3 area=    1024 bbox=(   640,  1568,  -224)-(   704,  1632,  -224) blades=  96
+surf  3604 ground1_6        verts= 4 area=    3200 bbox=(   640,  1568,  -224)-(   720,  1648,  -224) blades= 350
+surf  3759 ground1_6        verts= 3 area=     344 bbox=(   440,  1509,  -224)-(   460,  1544,  -224) blades=  39
+surf  3760 ground1_6        verts= 3 area=    1024 bbox=(   576,  1504,  -224)-(   640,  1568,  -224) blades= 158
+surf  3761 ground1_6        verts= 4 area=     808 bbox=(   440,  1496,  -224)-(   488,  1524,  -224) blades= 113
+surf  3762 ground1_6        verts= 8 area=   26432 bbox=(   440,  1496,  -224)-(   640,  1648,  -224) blades=3259
+surf  3801 ground1_6        verts= 4 area=     230 bbox=(   360,  1328,  -240)-(   374,  1328,  -224) blades=   4
+surf  3802 ground1_6        verts= 4 area=    2208 bbox=(   416,  1544,  -224)-(   440,  1648,  -224) blades= 395
+surf  3803 ground1_6        verts= 3 area=     102 bbox=(   424,  1496,  -224)-(   440,  1509,  -224) blades=  11
+surf  3804 ground1_6        verts= 5 area=    1363 bbox=(   416,  1490,  -224)-(   440,  1568,  -224) blades= 176
+surf  3805 ground1_6        verts= 5 area=    5478 bbox=(   384,  1464,  -224)-(   416,  1648,  -224) blades=1272
+surf  3806 ground1_6        verts= 5 area=    5376 bbox=(   360,  1424,  -224)-(   384,  1648,  -224) blades=1142
+surf  3807 ground1_6        verts= 4 area=    1536 bbox=(   360,  1360,  -224)-(   384,  1424,  -224) blades= 223
+surf  3808 ground1_6        verts= 5 area=     691 bbox=(   360,  1328,  -224)-(   384,  1360,  -224) blades=  90
+surf  3819 ground1_6        verts= 5 area=    3531 bbox=(   360,   896,  -224)-(   407,  1024,  -224) blades= 405
+surf  3820 ground1_6        verts= 3 area=     387 bbox=(   381,   920,  -224)-(   400,   991,  -224) blades=  12
+surf  3832 ground1_6        verts= 7 area=   17920 bbox=(  -112,   896,  -224)-(   112,   976,  -224) blades=2127
+surf  3833 ground1_6        verts= 5 area=    7680 bbox=(   112,   896,  -224)-(   208,   976,  -224) blades= 985
+surf  3834 ground1_6        verts= 5 area=    9899 bbox=(  -112,   976,  -224)-(    48,  1040,  -224) blades= 882
+surf  3835 ground1_6        verts= 6 area=    8768 bbox=(   -96,  1040,  -224)-(    48,  1104,  -224) blades= 706
+surf  3836 ground1_6        verts= 6 area=    1280 bbox=(    48,   976,  -224)-(    64,  1056,  -224) blades= 132
+surf  3837 ground1_6        verts= 5 area=    8192 bbox=(    64,   976,  -224)-(   192,  1040,  -224) blades=1085
+surf  3838 ground1_6        verts= 5 area=    1280 bbox=(   192,   976,  -224)-(   208,  1056,  -224) blades= 252
+surf  3843 ground1_6        verts= 8 area=   31132 bbox=(   208,   896,  -224)-(   360,  1104,  -224) blades=4723
+surf  3844 ground1_6        verts= 7 area=   13056 bbox=(  -112,  1408,  -224)-(   -48,  1632,  -224) blades=1740
+surf  3845 ground1_6        verts= 6 area=    5088 bbox=(  -112,  1328,  -224)-(   -48,  1408,  -224) blades= 557
+surf  3846 ground1_6        verts= 4 area=    1792 bbox=(   -96,  1584,  -224)-(   -48,  1648,  -224) blades=  60
+surf  3847 ground1_6        verts= 4 area=    3072 bbox=(   -48,  1328,  -224)-(    48,  1360,  -224) blades= 277
+surf  3848 ground1_6        verts= 5 area=   25088 bbox=(   -48,  1424,  -224)-(    64,  1648,  -224) blades=3889
+surf  3849 ground1_6        verts= 7 area=    7168 bbox=(   -48,  1360,  -224)-(    64,  1424,  -224) blades= 829
+surf  3850 ground1_6        verts= 4 area=   28672 bbox=(    64,  1424,  -224)-(   192,  1648,  -224) blades=3827
+surf  3851 ground1_6        verts= 4 area=    6144 bbox=(    64,  1376,  -224)-(   192,  1424,  -224) blades= 893
+surf  3852 ground1_6        verts= 5 area=    4864 bbox=(   208,  1328,  -224)-(   360,  1360,  -224) blades= 803
+surf  3853 ground1_6        verts= 4 area=   37632 bbox=(   192,  1424,  -224)-(   360,  1648,  -224) blades=5057
+surf  3854 ground1_6        verts= 6 area=   10752 bbox=(   192,  1360,  -224)-(   360,  1424,  -224) blades=1102
+surf  3944 ground1_6        verts= 7 area=    3584 bbox=(  -108,  1328,  -240)-(   116,  1328,  -224) blades= 449
+surf  3945 ground1_6        verts= 6 area=    3584 bbox=(   116,  1328,  -240)-(   340,  1328,  -224) blades= 366
+surf  3946 ground1_6        verts= 4 area=     320 bbox=(   340,  1328,  -240)-(   360,  1328,  -224) blades=   9
+surf  3953 ground1_6        verts= 6 area=    2048 bbox=(   -40,  1104,  -240)-(    88,  1104,  -224) blades= 104
+surf  3954 ground1_6        verts= 4 area=    1024 bbox=(   296,  1104,  -240)-(   360,  1104,  -224) blades=  68
+surf  3955 ground1_6        verts= 5 area=    3013 bbox=(   -96,  1088,  -240)-(   128,  1104,  -240) blades= 302
+surf  3956 ground1_6        verts= 4 area=     315 bbox=(   128,  1088,  -240)-(   192,  1098,  -240) blades=  41
+surf  3957 ground1_6        verts= 5 area=    2028 bbox=(   181,  1088,  -240)-(   360,  1104,  -240) blades= 211
+surf  3958 ground1_6        verts= 5 area=    1509 bbox=(    88,  1090,  -240)-(   181,  1104,  -224) blades= 215
+surf  3959 ground1_6        verts= 6 area=    1850 bbox=(   181,  1090,  -240)-(   296,  1104,  -224) blades= 169
+surf  3960 ground1_6        verts= 4 area=     932 bbox=(   -96,  1088,  -240)-(   -40,  1104,  -224) blades=  96
+surf  3962 ground1_6        verts= 4 area=    1221 bbox=(  -120,  1456,  -224)-(  -112,  1616,  -224) blades= 196
+surf  3963 ground1_6        verts= 3 area=      85 bbox=(  -120,   976,  -224)-(  -112,   997,  -224) blades=  11
+surf  3964 ground1_6        verts= 5 area=     640 bbox=(  -120,   896,  -224)-(  -112,   976,  -224) blades=  36
+surf  3969 ground1_6        verts= 4 area=     960 bbox=(  -160,   896,  -224)-(  -120,   944,  -224) blades=  71
+surf  3970 ground1_6        verts= 5 area=    5637 bbox=(  -192,  1463,  -224)-(  -120,  1608,  -224) blades=1198
+surf  3971 ground1_6        verts= 3 area=     247 bbox=(  -192,  1504,  -224)-(  -168,  1525,  -224) blades=  65
+surf  3978 ground1_6        verts= 7 area=   15716 bbox=(  -192,   496,  -248)-(   -80,   640,  -248) blades=2995
+surf  3987 ground1_6        verts= 4 area=    1296 bbox=(   208,   760,  -224)-(   244,   832,  -224) blades= 241
+surf  3988 ground1_6        verts= 4 area=    1872 bbox=(   232,   808,  -224)-(   328,   832,  -224) blades= 272
+surf  3989 ground1_6        verts= 8 area=   12722 bbox=(   208,   832,  -224)-(   417,   896,  -224) blades=1021
+surf  4200 ground1_6        verts= 5 area=    2281 bbox=(  -149,   772,  -224)-(  -120,   896,  -224) blades= 354
+surf  4201 ground1_6        verts= 5 area=     912 bbox=(  -144,   752,  -224)-(  -120,   808,  -224) blades= 128
+surf  4202 ground1_6        verts= 7 area=   32256 bbox=(  -120,   752,  -224)-(   104,   896,  -224) blades=3845
+surf  4203 ground1_6        verts= 9 area=   14960 bbox=(   104,   752,  -224)-(   208,   896,  -224) blades=2018
+surf  4219 ground1_6        verts= 3 area=     256 bbox=(   128,   720,  -224)-(   160,   736,  -224) blades=  25
+surf  4220 ground1_6        verts= 4 area=     768 bbox=(   128,   736,  -224)-(   192,   752,  -224) blades= 175
+surf  4228 ground1_6        verts= 6 area=    3499 bbox=(  -160,   720,  -224)-(    64,   736,  -224) blades= 700
+surf  4229 ground1_6        verts= 5 area=    1024 bbox=(    64,   720,  -224)-(   128,   736,  -224) blades=  69
+surf  4230 ground1_6        verts= 3 area=      21 bbox=(  -149,   736,  -224)-(  -144,   744,  -224) blades=   0 EMPTY
+surf  4231 ground1_6        verts= 7 area=    3563 bbox=(  -144,   736,  -224)-(    80,   752,  -224) blades= 524
+surf  4232 ground1_6        verts= 5 area=     768 bbox=(    80,   736,  -224)-(   128,   752,  -224) blades=  37
+surf  4233 ground1_6        verts= 5 area=    3606 bbox=(  -171,   704,  -228)-(    53,   720,  -224) blades= 520
+surf  4234 ground1_6        verts= 6 area=    1231 bbox=(    53,   704,  -228)-(   128,   720,  -224) blades= 267
+surf  4236 ground1_6        verts= 6 area=    3650 bbox=(  -178,   688,  -232)-(    46,   704,  -228) blades= 279
+surf  4237 ground1_6        verts= 5 area=     293 bbox=(    46,   688,  -232)-(    64,   704,  -228) blades=  71
+surf  4238 ground1_6        verts= 3 area=      21 bbox=(  -144,   744,  -224)-(  -139,   752,  -224) blades=   0 EMPTY
+surf  4243 ground1_6        verts= 5 area=    1840 bbox=(  -180,   680,  -234)-(    44,   688,  -232) blades= 116
+surf  4244 ground1_6        verts= 7 area=     689 bbox=(    44,   680,  -234)-(   128,   688,  -232) blades= 194
+surf  4249 ground1_6        verts= 5 area=    5475 bbox=(  -185,   656,  -240)-(    39,   680,  -234) blades= 852
+surf  4250 ground1_6        verts= 6 area=     517 bbox=(    39,   656,  -240)-(    64,   680,  -234) blades= 119
+surf  4308 ground1_6        verts= 4 area=    1908 bbox=(  -188,   640,  -248)-(   -80,   656,  -240) blades= 312
+surf  4310 ground1_6        verts= 4 area=    1479 bbox=(  -160,   816,  -224)-(  -132,   896,  -224) blades= 188
+surf  4422 ground1_6        verts= 3 area=     128 bbox=(   -32,  1696,  -224)-(   -16,  1712,  -224) blades=   6
+surf  4423 ground1_6        verts= 8 area=    8832 bbox=(  -192,  1536,  -224)-(  -112,  1712,  -224) blades=1155
+surf  4424 ground1_6        verts= 5 area=    1024 bbox=(  -128,  1632,  -224)-(   -64,  1664,  -224) blades= 133
+surf  4425 ground1_6        verts= 3 area=     256 bbox=(  -112,  1616,  -224)-(   -96,  1648,  -224) blades=  19
+surf  4426 ground1_6        verts= 3 area=     128 bbox=(  -176,  1696,  -224)-(  -160,  1712,  -224) blades=  25
+surf  4460 ground1_6        verts= 5 area=   11252 bbox=(  -336,  1504,  -224)-(  -192,  1648,  -224) blades=1727
+surf  4461 ground1_6        verts= 5 area=   18103 bbox=(  -336,  1525,  -224)-(  -192,  1712,  -224) blades=3542
+surf  4475 ground1_6        verts= 4 area=    1241 bbox=(  -418,  1560,  -224)-(  -352,  1638,  -224) blades= 347
+surf  4476 ground1_6        verts= 4 area=     888 bbox=(  -458,  1632,  -224)-(  -416,  1684,  -224) blades=  41
+surf  4477 ground1_6        verts= 9 area=   15162 bbox=(  -465,  1541,  -224)-(  -336,  1744,  -224) blades=3058
+# totals: 100 surfaces, 2 empty, 74073 blades

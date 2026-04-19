@@ -95,6 +95,23 @@ extern GLint    R_WorldFenceShader_u_lightmap;
 extern GLint    R_WorldFenceShader_u_alpha;
 
 // ---------------------------------------------------------------------------
+// Shared shader: `world_grass`
+//   Same layout as `world_opaque`, with a green tint applied per-fragment.
+//   Used by textures marked via the `grow_grass` command. Iteration 1 of
+//   the grass experiment; iteration 2 adds blade geometry in a second pass
+//   (see docs/experiment_grass.md).
+// ---------------------------------------------------------------------------
+extern GLShader R_WorldGrassShader;
+extern GLint    R_WorldGrassShader_u_mvp;
+extern GLint    R_WorldGrassShader_u_tex;
+extern GLint    R_WorldGrassShader_u_lightmap;
+extern GLint    R_WorldGrassShader_u_alpha;
+qboolean R_EnsureWorldGrassShader(void);
+void     Grass_Init(void);
+void     Grass_OnNewMap(void);   // auto-mark textures listed in grass_auto_names
+void     Grass_DrawBlades(void); // second pass: vertical quads over grass-marked surfaces
+
+// ---------------------------------------------------------------------------
 // Shared shader: `world_fullbright`
 //   Attrs: vec3 pos (loc 0), vec2 tc (loc 1).
 //   Uniform: mat4 u_mvp, sampler2D u_tex.
