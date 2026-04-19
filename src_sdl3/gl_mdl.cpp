@@ -25,27 +25,139 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_render.h"
 #include "gl_profiler.h"
 
-// Streaming VBO + staging buffer shared by all alias draws.
-typedef struct {
-	float x, y, z;
-	float s, t;
-	unsigned char r, g, b, a;
-} alias_vtx_t;
-
-#define ALIAS_MAX_VERTS 65536
-static alias_vtx_t alias_soup[ALIAS_MAX_VERTS];
-static DynamicVBO  alias_vbo;
-static qboolean    alias_vbo_ready = false;
-
-static void Alias_EnsureVBO(void)
+// Per-model VAO for the GPU path. Each model has its own (texcoord VBO, IBO)
+// pair, so we allocate a VAO per model lazily on first draw. We cache inside
+// the aliashdr_t -- we reuse gpu_vbo_texcoords layout so we do not store
+// a separate field, but we DO need the VAO id. Using a GL object directly
+// in aliashdr is simpler than adding yet another field.
+static void Alias_EnsureGPU_VAO (aliashdr_t *hdr, GLuint *out_vao)
 {
-	if (alias_vbo_ready) return;
+	// We stash the VAO in gpu_num_indices' high bits? No -- keep it simple,
+	// use a small static map. For most scenes there's <256 alias models.
+	// Key = ssbo handle (stable). Value = VAO handle.
+	enum { MAP_SIZE = 256 };
+	static GLuint keys[MAP_SIZE];
+	static GLuint vaos[MAP_SIZE];
+	static int    map_count = 0;
+
+	for (int i = 0; i < map_count; ++i) {
+		if (keys[i] == hdr->gpu_ssbo_poses) { *out_vao = vaos[i]; return; }
+	}
+
+	GLuint vao = 0;
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	// Texcoord attribute (location 0 in alias_gpu shader).
+	glBindBuffer(GL_ARRAY_BUFFER, hdr->gpu_vbo_texcoords);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (const void *)0);
+
+	// Element buffer.
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, hdr->gpu_ibo);
+
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+	if (map_count < MAP_SIZE) {
+		keys[map_count] = hdr->gpu_ssbo_poses;
+		vaos[map_count] = vao;
+		map_count++;
+	}
+	*out_vao = vao;
+}
+
+// Shading state set up by R_DrawAliasModel before it calls this function:
+//  - lightcolor  : RGB of the dynamic+static light sampled at the entity
+//  - shadedots_mdl / shadedots2_mdl : the two anorm-dot rows being blended
+//    between (ceil vs floor of the entity's yaw bucket)
+//  - lightlerpoffset : 0..1 factor to blend those two rows
+extern float   *shadedots_mdl;
+extern float   *shadedots2_mdl;
+extern vec3_t   lightcolor;
+extern float    lightlerpoffset;
+extern int      lastposenum;
+extern int      lastposenum0;
+extern float    r_avertexnormal_dots_mdl[16][256];
+
+// Draw one alias-model frame using the shader-based path.
+// The vertex shader reads two poses from an SSBO, interpolates position and
+// lighting, and emits the final color. No triangulation or shading on CPU.
+static void GL_DrawAliasBlendedFrame_Impl (int frame, aliashdr_t *hdr, entity_t *e)
+{
 	if (!R_EnsureAliasShader()) return;
-	DynamicVBO_Init(&alias_vbo, sizeof(alias_soup));
-	DynamicVBO_SetAttrib(&alias_vbo, 0, 3, GL_FLOAT,         GL_FALSE, sizeof(alias_vtx_t), offsetof(alias_vtx_t, x));
-	DynamicVBO_SetAttrib(&alias_vbo, 1, 2, GL_FLOAT,         GL_FALSE, sizeof(alias_vtx_t), offsetof(alias_vtx_t, s));
-	DynamicVBO_SetAttrib(&alias_vbo, 2, 4, GL_UNSIGNED_BYTE, GL_TRUE,  sizeof(alias_vtx_t), offsetof(alias_vtx_t, r));
-	alias_vbo_ready = true;
+	if (hdr->gpu_ssbo_poses == 0 || hdr->gpu_ibo == 0 || hdr->gpu_num_indices <= 0) return;
+
+	// Resolve the two poses + blend factor exactly like the CPU path. This
+	// logic also updates e->pose1 / e->pose2 / e->frame_start_time.
+	if ((frame >= hdr->numframes) || (frame < 0)) frame = 0;
+	int pose      = hdr->frames[frame].firstpose;
+	int numposes  = hdr->frames[frame].numposes;
+	if (numposes > 1) {
+		e->frame_interval = hdr->frames[frame].interval;
+		pose += (int)(cl.time / e->frame_interval) % numposes;
+	} else {
+		e->frame_interval = 0.1f;
+	}
+
+	float blend;
+	if (e->pose2 != pose) {
+		e->frame_start_time = realtime;
+		e->pose1 = e->pose2;
+		e->pose2 = pose;
+		blend = 0;
+	} else {
+		blend = (float)((realtime - e->frame_start_time) * slowmo.value) / e->frame_interval;
+		if (cl.paused || blend > 1) blend = 1;
+	}
+
+	lastposenum0 = e->pose1;
+	lastposenum  = e->pose2;
+
+	int pose_a_base = e->pose1 * hdr->poseverts;
+	int pose_b_base = e->pose2 * hdr->poseverts;
+
+	GLuint vao = 0;
+	Alias_EnsureGPU_VAO(hdr, &vao);
+	glBindVertexArray(vao);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, hdr->gpu_ssbo_poses);
+
+	float mvp[16];
+	R_CurrentMVP(mvp);
+
+	GLShader_Use(&R_AliasShader);
+	glUniformMatrix4fv(R_AliasShader_u_mvp, 1, GL_FALSE, mvp);
+	glUniform1i  (R_AliasShader_u_tex, 0);
+	glUniform1i  (R_AliasShader_u_pose_a, pose_a_base);
+	glUniform1i  (R_AliasShader_u_pose_b, pose_b_base);
+	glUniform1f  (R_AliasShader_u_blend,  blend);
+	glUniform1f  (R_AliasShader_u_alpha,  e->alpha);
+	glUniform1i  (R_AliasShader_u_fullbright, e->model->fullbright ? 1 : 0);
+
+	if (e->model->fullbright) {
+		// fullbright ignores shade inputs, but set sane defaults.
+		glUniform3f(R_AliasShader_u_shade_color, 1.0f, 1.0f, 1.0f);
+		glUniform1f(R_AliasShader_u_lightlerpoffset, 0.0f);
+	} else {
+		glUniform3f(R_AliasShader_u_shade_color,
+		            lightcolor[0], lightcolor[1], lightcolor[2]);
+		glUniform1f(R_AliasShader_u_lightlerpoffset, lightlerpoffset);
+
+		// Recover the yaw-angle row indices from the pointers the CPU path
+		// sets up. r_avertexnormal_dots_mdl is a 16x256 table; the pointer
+		// arithmetic gives us back the row number 0..15.
+		int row_ceil  = (int)(shadedots_mdl  - &r_avertexnormal_dots_mdl[0][0]) / 256;
+		int row_floor = (int)(shadedots2_mdl - &r_avertexnormal_dots_mdl[0][0]) / 256;
+		glUniform1i(R_AliasShader_u_dot_row_ceil,  row_ceil  & 15);
+		glUniform1i(R_AliasShader_u_dot_row_floor, row_floor & 15);
+	}
+
+	Prof_CountDraw(hdr->gpu_num_indices);
+	glDrawElements(GL_TRIANGLES, hdr->gpu_num_indices, GL_UNSIGNED_SHORT, (const void *)0);
+
+	glBindVertexArray(0);
+	glUseProgram(0);
 }
 
 stvert_t	stverts[MAXALIASVERTS];
@@ -1025,173 +1137,17 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 /*
 =============
 GL_DrawAliasBlendedFrame
+
+Thin forwarder to the GPU path. Kept as a separate symbol because
+R_DrawAliasModel still calls it (potentially twice: once for diffuse, once
+for fullbright overlay). The actual work lives in
+GL_DrawAliasBlendedFrame_GPU, which does pose interpolation + shading in
+the vertex shader.
 =============
 */
 void GL_DrawAliasBlendedFrame (int frame, aliashdr_t *paliashdr, entity_t* e)
 {
-	float		l, blend;
-	trivertx_t	*verts1, *verts2;
-	int			count, pose, numposes, *order;
-	vec3_t		d;
-
-	if ((frame >= paliashdr->numframes) || (frame < 0))
-	{
-		Con_DPrintf ("GL_DrawAliasBlendedFrame: no such frame %d\n", frame);
-		frame = 0;
-	}
-
-	pose		= paliashdr->frames[frame].firstpose;
-	numposes	= paliashdr->frames[frame].numposes;
-
-	if (numposes > 1)
-	{
-		e->frame_interval = paliashdr->frames[frame].interval;
-		pose += (int)(cl.time / e->frame_interval) % numposes;
-	}
-	else 
-	{
-		e->frame_interval = 0.1f;
-	}
-
-	if (e->pose2 != pose)
-	{
-		e->frame_start_time = realtime;
-		e->pose1 = e->pose2;
-		e->pose2 = pose;
-		blend = 0;
-	}
-	else
-	{
-		blend = ((realtime - e->frame_start_time)*slowmo.value) / e->frame_interval;
-
-		if (cl.paused || blend > 1) 
-			blend = 1;
-	}
-
-	lastposenum0 = e->pose1;
-	lastposenum  = e->pose2;
-
-	verts1  = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
-	verts2  = verts1;
-
-	verts1 += e->pose1 * paliashdr->poseverts;
-	verts2 += e->pose2 * paliashdr->poseverts;
-
-	order = (int *)((byte *)paliashdr + paliashdr->commands);
-
-	Alias_EnsureVBO();
-	if (!alias_vbo_ready)
-		return;
-
-	// Traverse the command list, computing lerp + lighting per vertex on the
-	// CPU, then re-triangulating fans and strips into a single triangle soup.
-	int nverts = 0;
-	unsigned char eA = (unsigned char)(e->alpha * 255.0f + 0.5f);
-
-	// scratch per-strip/fan buffers
-	static alias_vtx_t strip[256];
-
-	for (;;)
-	{
-		count = *order++;
-		if (!count) break;
-
-		qboolean is_fan = (count < 0);
-		if (is_fan) count = -count;
-		if (count > 256) count = 256;
-
-		for (int i = 0; i < count; ++i)
-		{
-			float s_tc = ((float *)order)[0];
-			float t_tc = ((float *)order)[1];
-			order += 2;
-
-			// Blend positions between poses.
-			VectorSubtract(verts2->v, verts1->v, d);
-			float px = verts1->v[0] + blend * d[0];
-			float py = verts1->v[1] + blend * d[1];
-			float pz = verts1->v[2] + blend * d[2];
-
-			unsigned char cr, cg, cb;
-			if (!e->model->fullbright)
-			{
-				float d2, l1, l2, diff;
-				d[0] = shadedots_mdl[verts2->lightnormalindex] - shadedots_mdl[verts1->lightnormalindex];
-				d2   = shadedots2_mdl[verts2->lightnormalindex] - shadedots2_mdl[verts1->lightnormalindex];
-				l1 = shadedots_mdl[verts1->lightnormalindex]  + blend * d[0];
-				l2 = shadedots2_mdl[verts1->lightnormalindex] + blend * d2;
-				if (l1 != l2) {
-					if (l1 > l2) { diff = (l1 - l2) * lightlerpoffset; l = l1 - diff; }
-					else         { diff = (l2 - l1) * lightlerpoffset; l = l1 + diff; }
-				} else {
-					l = l1;
-				}
-				float fr = l * lightcolor[0];
-				float fg = l * lightcolor[1];
-				float fb = l * lightcolor[2];
-				if (fr > 1.0f) fr = 1.0f;
-				if (fg > 1.0f) fg = 1.0f;
-				if (fb > 1.0f) fb = 1.0f;
-				cr = (unsigned char)(fr * 255.0f + 0.5f);
-				cg = (unsigned char)(fg * 255.0f + 0.5f);
-				cb = (unsigned char)(fb * 255.0f + 0.5f);
-			}
-			else
-			{
-				cr = cg = cb = 255;
-			}
-
-			strip[i] = { px, py, pz, s_tc, t_tc, cr, cg, cb, eA };
-
-			verts1++;
-			verts2++;
-		}
-
-		// Re-triangulate strip or fan into triangle soup.
-		if (is_fan)
-		{
-			for (int i = 1; i < count - 1; ++i)
-			{
-				if (nverts + 3 > ALIAS_MAX_VERTS) goto flush;
-				alias_soup[nverts++] = strip[0];
-				alias_soup[nverts++] = strip[i];
-				alias_soup[nverts++] = strip[i + 1];
-			}
-		}
-		else
-		{
-			for (int i = 0; i < count - 2; ++i)
-			{
-				if (nverts + 3 > ALIAS_MAX_VERTS) goto flush;
-				if (i & 1) {
-					alias_soup[nverts++] = strip[i + 1];
-					alias_soup[nverts++] = strip[i];
-					alias_soup[nverts++] = strip[i + 2];
-				} else {
-					alias_soup[nverts++] = strip[i];
-					alias_soup[nverts++] = strip[i + 1];
-					alias_soup[nverts++] = strip[i + 2];
-				}
-			}
-		}
-	}
-
-flush:
-	if (nverts == 0)
-		return;
-
-	float mvp[16];
-	R_CurrentMVP(mvp);
-
-	GLShader_Use(&R_AliasShader);
-	glUniformMatrix4fv(R_AliasShader_u_mvp, 1, GL_FALSE, mvp);
-	glUniform1i       (R_AliasShader_u_tex, 0);
-
-	DynamicVBO_Upload(&alias_vbo, alias_soup, (GLsizei)(nverts * sizeof(alias_vtx_t)));
-	DynamicVBO_Bind(&alias_vbo);
-	Prof_CountDraw(nverts);
-	glDrawArrays(GL_TRIANGLES, 0, nverts);
-
-	glBindVertexArray(0);
-	glUseProgram(0);
+	if (paliashdr->gpu_ssbo_poses == 0)
+		return; // Alias_BuildGPUData didn't run or failed for this model
+	GL_DrawAliasBlendedFrame_Impl(frame, paliashdr, e);
 }

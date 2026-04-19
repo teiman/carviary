@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_profiler.h"
+#include "gl_render.h"
 
 void R_InitParticles (void);
 void R_ClearParticles ();
@@ -116,6 +117,10 @@ void R_Init (void)
 	R_InitParticles (); // initiate particle engine
 
 	glGenTextures(16, playertextures);
+
+	// Compile the alias shader at startup so any GLSL error shows up here
+	// rather than the first time an entity is drawn.
+	R_EnsureAliasShader();
 
 	Prof_Init ();
 }

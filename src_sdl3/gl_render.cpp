@@ -25,8 +25,17 @@ GLint    R_FullscreenShader_u_mvp   = -1;
 GLint    R_FullscreenShader_u_color = -1;
 
 GLShader R_AliasShader;
-GLint    R_AliasShader_u_mvp = -1;
-GLint    R_AliasShader_u_tex = -1;
+GLint    R_AliasShader_u_mvp              = -1;
+GLint    R_AliasShader_u_tex              = -1;
+GLint    R_AliasShader_u_pose_a           = -1;
+GLint    R_AliasShader_u_pose_b           = -1;
+GLint    R_AliasShader_u_blend            = -1;
+GLint    R_AliasShader_u_shade_color      = -1;
+GLint    R_AliasShader_u_lightlerpoffset  = -1;
+GLint    R_AliasShader_u_alpha            = -1;
+GLint    R_AliasShader_u_fullbright       = -1;
+GLint    R_AliasShader_u_dot_row_ceil     = -1;
+GLint    R_AliasShader_u_dot_row_floor    = -1;
 
 GLShader R_WorldOpaqueShader;
 GLint    R_WorldOpaqueShader_u_mvp      = -1;
@@ -195,39 +204,151 @@ qboolean R_EnsureFullscreenShader(void)
 }
 
 // ---------------------------------------------------------------------------
+// Alias shader. Reads two poses from an SSBO bound at binding 0, interpolates
+// position and normal, does per-vertex Quake-style shading with a 16-row
+// brightness table (UBO binding 1), and emits a vec4 color for the fragment
+// shader. Only attribute is the texture coordinate; positions come from the
+// SSBO indexed by gl_VertexID.
+// ---------------------------------------------------------------------------
 qboolean R_EnsureAliasShader(void)
 {
 	if (alias_ok) return true;
 
+	// GLSL 4.30 for std430 SSBOs; we're on a 4.4 context.
+	// Shading mirrors the CPU path exactly: two precomputed per-normal
+	// brightness arrays (one for the ceil() light-angle bucket, one for
+	// floor()), blended with u_lightlerpoffset. Then multiply by the
+	// per-entity light color and clamp per channel. The u_normals array
+	// isn't needed here because positions are dequantized directly and
+	// shading uses only the normal index.
 	const char *vs =
-		"#version 330 core\n"
-		"layout(location = 0) in vec3 a_pos;\n"
-		"layout(location = 1) in vec2 a_tc;\n"
-		"layout(location = 2) in vec4 a_color;\n"
-		"uniform mat4 u_mvp;\n"
+		"#version 430 core\n"
+		"layout(location = 0) in vec2 a_tc;\n"
+		"\n"
+		"layout(std430, binding = 0) readonly buffer PoseBuf { uint poses[]; };\n"
+		"\n"
+		"uniform mat4  u_mvp;\n"
+		"uniform int   u_pose_a;\n"
+		"uniform int   u_pose_b;\n"
+		"uniform float u_blend;\n"
+		"uniform vec3  u_shade_color;\n"
+		"uniform float u_lightlerpoffset;\n"
+		"uniform float u_alpha;\n"
+		"uniform int   u_fullbright;\n"
+		"uniform int   u_dot_row_ceil;\n"
+		"uniform int   u_dot_row_floor;\n"
+		"// 16 yaw-angle brightness rows of 256 floats each, packed as vec4s\n"
+		"// so the whole table fits in one 16 KB std140 uniform block. We pack\n"
+		"// 4 scalars per vec4 and index by (i/4).xyzw[i%4] in the shader.\n"
+		"// Uploaded once at shader build time; per-draw we only send two\n"
+		"// row indices.\n"
+		"layout(std140) uniform AnormDotsBlock { vec4 u_anorm_dots[16 * 64]; };\n"
+		"\n"
+		"float dot_row (int row, int n) {\n"
+		"    int idx = row * 256 + n;\n"
+		"    return u_anorm_dots[idx >> 2][idx & 3];\n"
+		"}\n"
+		"\n"
 		"out vec2 v_tc;\n"
 		"out vec4 v_color;\n"
+		"\n"
+		"void unpack(in uint w, out vec3 pos, out int nidx) {\n"
+		"    pos = vec3(float(w & 0xFFu),\n"
+		"               float((w >> 8) & 0xFFu),\n"
+		"               float((w >> 16) & 0xFFu));\n"
+		"    nidx = int((w >> 24) & 0xFFu);\n"
+		"}\n"
+		"\n"
 		"void main() {\n"
+		"    int idx = gl_VertexID;\n"
+		"    uint wa = poses[u_pose_a + idx];\n"
+		"    uint wb = poses[u_pose_b + idx];\n"
+		"    vec3 pa; int na;\n"
+		"    vec3 pb; int nb;\n"
+		"    unpack(wa, pa, na);\n"
+		"    unpack(wb, pb, nb);\n"
+		"\n"
+		"    // Positions stay in model's quantized byte space; scale + origin\n"
+		"    // are already baked into the modelview stack by R_DrawAliasModel\n"
+		"    // (MulTranslate + MulScale before drawing). This matches the CPU\n"
+		"    // path, which also passes the raw byte values straight to the\n"
+		"    // shader via a_pos.\n"
+		"    vec3 pos = mix(pa, pb, u_blend);\n"
+		"\n"
+		"    vec3 lit;\n"
+		"    if (u_fullbright != 0) {\n"
+		"        lit = vec3(1.0);\n"
+		"    } else {\n"
+		"        // Interpolate brightness between the two poses using u_blend,\n"
+		"        // and between the two light-angle rows using u_lightlerpoffset.\n"
+		"        // Matches the CPU fallback in gl_mdl.cpp.\n"
+		"        float ca = dot_row(u_dot_row_ceil,  na);\n"
+		"        float cb = dot_row(u_dot_row_ceil,  nb);\n"
+		"        float fa = dot_row(u_dot_row_floor, na);\n"
+		"        float fb = dot_row(u_dot_row_floor, nb);\n"
+		"        float lc = mix(ca, cb, u_blend);\n"
+		"        float lf = mix(fa, fb, u_blend);\n"
+		"        float l;\n"
+		"        if (lc > lf)      l = lc - (lc - lf) * u_lightlerpoffset;\n"
+		"        else if (lf > lc) l = lc + (lf - lc) * u_lightlerpoffset;\n"
+		"        else              l = lc;\n"
+		"        lit = clamp(u_shade_color * l, 0.0, 1.0);\n"
+		"    }\n"
+		"\n"
 		"    v_tc = a_tc;\n"
-		"    v_color = a_color;\n"
-		"    gl_Position = u_mvp * vec4(a_pos, 1.0);\n"
+		"    v_color = vec4(lit, u_alpha);\n"
+		"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
 		"}\n";
 
 	const char *fs =
-		"#version 330 core\n"
+		"#version 430 core\n"
 		"in vec2 v_tc;\n"
 		"in vec4 v_color;\n"
 		"uniform sampler2D u_tex;\n"
 		"out vec4 frag_color;\n"
 		"void main() { frag_color = texture(u_tex, v_tc) * v_color; }\n";
 
-	char err[512];
+	char err[1024];
 	if (!GLShader_Build(&R_AliasShader, vs, fs, err, sizeof(err))) {
-		Con_Printf("alias_model shader failed: %s\n", err);
+		Con_Printf("alias shader failed: %s\n", err);
 		return false;
 	}
-	R_AliasShader_u_mvp = GLShader_Uniform(&R_AliasShader, "u_mvp");
-	R_AliasShader_u_tex = GLShader_Uniform(&R_AliasShader, "u_tex");
+
+	R_AliasShader_u_mvp             = GLShader_Uniform(&R_AliasShader, "u_mvp");
+	R_AliasShader_u_tex             = GLShader_Uniform(&R_AliasShader, "u_tex");
+	R_AliasShader_u_pose_a          = GLShader_Uniform(&R_AliasShader, "u_pose_a");
+	R_AliasShader_u_pose_b          = GLShader_Uniform(&R_AliasShader, "u_pose_b");
+	R_AliasShader_u_blend           = GLShader_Uniform(&R_AliasShader, "u_blend");
+	R_AliasShader_u_shade_color     = GLShader_Uniform(&R_AliasShader, "u_shade_color");
+	R_AliasShader_u_lightlerpoffset = GLShader_Uniform(&R_AliasShader, "u_lightlerpoffset");
+	R_AliasShader_u_alpha           = GLShader_Uniform(&R_AliasShader, "u_alpha");
+	R_AliasShader_u_fullbright      = GLShader_Uniform(&R_AliasShader, "u_fullbright");
+	R_AliasShader_u_dot_row_ceil    = GLShader_Uniform(&R_AliasShader, "u_dot_row_ceil");
+	R_AliasShader_u_dot_row_floor   = GLShader_Uniform(&R_AliasShader, "u_dot_row_floor");
+
+	// Upload the full 16x256 anorm-dots table once, as a std140 UBO. Using
+	// a plain uniform float[4096] blew past NVIDIA's per-stage uniform
+	// location limits. UBOs have a minimum guaranteed size of 16 KB in GL
+	// 4.4 core, which fits 4096 floats packed as 1024 vec4s exactly.
+	{
+		extern float r_avertexnormal_dots_mdl[16][256];
+		static GLuint anorm_dots_ubo = 0;
+		glGenBuffers(1, &anorm_dots_ubo);
+		glBindBuffer(GL_UNIFORM_BUFFER, anorm_dots_ubo);
+
+		// Repack 4096 floats into 1024 vec4s (16 KB std140-compatible).
+		float packed[1024 * 4];
+		memcpy(packed, &r_avertexnormal_dots_mdl[0][0], sizeof(packed));
+		glBufferData(GL_UNIFORM_BUFFER, sizeof(packed), packed, GL_STATIC_DRAW);
+		glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+		GLuint block_idx = glGetUniformBlockIndex(R_AliasShader.program, "AnormDotsBlock");
+		if (block_idx != GL_INVALID_INDEX) {
+			glUniformBlockBinding(R_AliasShader.program, block_idx, 1);
+			glBindBufferBase(GL_UNIFORM_BUFFER, 1, anorm_dots_ubo);
+		}
+	}
+
 	alias_ok = true;
 	return true;
 }

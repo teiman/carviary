@@ -50,15 +50,26 @@ extern GLint    R_FullscreenShader_u_mvp;
 extern GLint    R_FullscreenShader_u_color;
 
 // ---------------------------------------------------------------------------
-// Shared shader: `alias_model`
-//   Attrs: vec3 pos (loc 0), vec2 tc (loc 1), vec4 color (loc 2, ubyte normalized).
-//   Uniform: mat4 u_mvp, sampler2D u_tex.
-//   Used by: gl_mdl (animated model rendering with per-vertex light).
-// Lerp + per-vertex lighting are computed on the CPU and baked into color.
+// Shader: `alias`
+//   GLSL 4.30 core. Pose interpolation + Quake-style per-vertex shading
+//   in the vertex shader. Positions come from an SSBO at binding 0 holding
+//   all poses packed (byte[3] pos + byte lightnormalindex per vertex). The
+//   16-row yaw-brightness table lives in a std140 UBO at binding 1.
+//   Attrs: vec2 tc (loc 0). Everything else is uniforms.
+//   Used by: gl_mdl.
 // ---------------------------------------------------------------------------
 extern GLShader R_AliasShader;
 extern GLint    R_AliasShader_u_mvp;
 extern GLint    R_AliasShader_u_tex;
+extern GLint    R_AliasShader_u_pose_a;
+extern GLint    R_AliasShader_u_pose_b;
+extern GLint    R_AliasShader_u_blend;
+extern GLint    R_AliasShader_u_shade_color;
+extern GLint    R_AliasShader_u_lightlerpoffset;
+extern GLint    R_AliasShader_u_alpha;
+extern GLint    R_AliasShader_u_fullbright;
+extern GLint    R_AliasShader_u_dot_row_ceil;
+extern GLint    R_AliasShader_u_dot_row_floor;
 
 // ---------------------------------------------------------------------------
 // Shared shader: `world_opaque`
