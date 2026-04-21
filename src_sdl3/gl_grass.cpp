@@ -20,26 +20,59 @@ extern GLuint lightmap_textures[]; // defined in gl_rsurf.cpp
 // before investing in blade geometry.
 // ---------------------------------------------------------------------------
 GLShader R_WorldGrassShader;
-GLint    R_WorldGrassShader_u_mvp      = -1;
-GLint    R_WorldGrassShader_u_tex      = -1;
-GLint    R_WorldGrassShader_u_lightmap = -1;
-GLint    R_WorldGrassShader_u_alpha    = -1;
+GLint    R_WorldGrassShader_u_mvp        = -1;
+GLint    R_WorldGrassShader_u_tex        = -1;
+GLint    R_WorldGrassShader_u_lightmap   = -1;
+GLint    R_WorldGrassShader_u_alpha      = -1;
+GLint    R_WorldGrassShader_u_dream_amp  = -1;
+GLint    R_WorldGrassShader_u_dream_time = -1;
 static qboolean world_grass_ok = false;
 
-// Shares the world vertex layout. Re-declared here as a literal so we don't
-// need to export `world_vs_src` from gl_render.cpp.
+// Shares the world vertex layout. Re-declared here with the same dream-warp
+// math as world_vs_src in gl_render.cpp so grass surfaces move coherently
+// with the rest of the world when r_dream_amp > 0.
 static const char *grass_vs_src =
 	"#version 330 core\n"
 	"layout(location = 0) in vec3 a_pos;\n"
 	"layout(location = 1) in vec2 a_tc;\n"
 	"layout(location = 2) in vec2 a_lmtc;\n"
-	"uniform mat4 u_mvp;\n"
+	"uniform mat4  u_mvp;\n"
+	"uniform float u_dream_amp;\n"
+	"uniform float u_dream_time;\n"
 	"out vec2 v_tc;\n"
 	"out vec2 v_lmtc;\n"
+	"float dream_hash31(vec3 p) {\n"
+	"    p = fract(p * vec3(0.1031, 0.1030, 0.0973));\n"
+	"    p += dot(p, p.yxz + 33.33);\n"
+	"    return fract((p.x + p.y) * p.z);\n"
+	"}\n"
+	"float dream_vnoise3(vec3 p) {\n"
+	"    vec3 i = floor(p); vec3 f = fract(p);\n"
+	"    f = f*f*(3.0 - 2.0*f);\n"
+	"    float a = dream_hash31(i+vec3(0,0,0));\n"
+	"    float b = dream_hash31(i+vec3(1,0,0));\n"
+	"    float c = dream_hash31(i+vec3(0,1,0));\n"
+	"    float d = dream_hash31(i+vec3(1,1,0));\n"
+	"    float e = dream_hash31(i+vec3(0,0,1));\n"
+	"    float g = dream_hash31(i+vec3(1,0,1));\n"
+	"    float h = dream_hash31(i+vec3(0,1,1));\n"
+	"    float k = dream_hash31(i+vec3(1,1,1));\n"
+	"    return mix(mix(mix(a,b,f.x),mix(c,d,f.x),f.y),\n"
+	"               mix(mix(e,g,f.x),mix(h,k,f.x),f.y), f.z);\n"
+	"}\n"
+	"vec3 dream_offset(vec3 wp, float t) {\n"
+	"    vec3 q = wp * 0.015 + vec3(t*0.07, -t*0.05, t*0.04);\n"
+	"    float nx = dream_vnoise3(q + vec3(  0,   0,   0)) - 0.5;\n"
+	"    float ny = dream_vnoise3(q + vec3(31,  17,   5)) - 0.5;\n"
+	"    float nz = dream_vnoise3(q + vec3(73,  41, 101)) - 0.5;\n"
+	"    return vec3(nx, ny, nz) * 2.0;\n"
+	"}\n"
 	"void main() {\n"
+	"    vec3 pos = a_pos;\n"
+	"    if (u_dream_amp > 0.0) pos += dream_offset(a_pos, u_dream_time) * u_dream_amp;\n"
 	"    v_tc = a_tc;\n"
 	"    v_lmtc = a_lmtc;\n"
-	"    gl_Position = u_mvp * vec4(a_pos, 1.0);\n"
+	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
 	"}\n";
 
 qboolean R_EnsureWorldGrassShader (void)
@@ -68,10 +101,12 @@ qboolean R_EnsureWorldGrassShader (void)
 		Con_Printf("world_grass shader failed: %s\n", err);
 		return false;
 	}
-	R_WorldGrassShader_u_mvp      = GLShader_Uniform(&R_WorldGrassShader, "u_mvp");
-	R_WorldGrassShader_u_tex      = GLShader_Uniform(&R_WorldGrassShader, "u_tex");
-	R_WorldGrassShader_u_lightmap = GLShader_Uniform(&R_WorldGrassShader, "u_lightmap");
-	R_WorldGrassShader_u_alpha    = GLShader_Uniform(&R_WorldGrassShader, "u_alpha");
+	R_WorldGrassShader_u_mvp        = GLShader_Uniform(&R_WorldGrassShader, "u_mvp");
+	R_WorldGrassShader_u_tex        = GLShader_Uniform(&R_WorldGrassShader, "u_tex");
+	R_WorldGrassShader_u_lightmap   = GLShader_Uniform(&R_WorldGrassShader, "u_lightmap");
+	R_WorldGrassShader_u_alpha      = GLShader_Uniform(&R_WorldGrassShader, "u_alpha");
+	R_WorldGrassShader_u_dream_amp  = GLShader_Uniform(&R_WorldGrassShader, "u_dream_amp");
+	R_WorldGrassShader_u_dream_time = GLShader_Uniform(&R_WorldGrassShader, "u_dream_time");
 	world_grass_ok = true;
 	return true;
 }

@@ -83,6 +83,8 @@ extern GLint    R_WorldOpaqueShader_u_mvp;
 extern GLint    R_WorldOpaqueShader_u_tex;
 extern GLint    R_WorldOpaqueShader_u_lightmap;
 extern GLint    R_WorldOpaqueShader_u_alpha;
+extern GLint    R_WorldOpaqueShader_u_dream_amp;
+extern GLint    R_WorldOpaqueShader_u_dream_time;
 
 // ---------------------------------------------------------------------------
 // Shared shader: `world_fence`
@@ -93,6 +95,8 @@ extern GLint    R_WorldFenceShader_u_mvp;
 extern GLint    R_WorldFenceShader_u_tex;
 extern GLint    R_WorldFenceShader_u_lightmap;
 extern GLint    R_WorldFenceShader_u_alpha;
+extern GLint    R_WorldFenceShader_u_dream_amp;
+extern GLint    R_WorldFenceShader_u_dream_time;
 
 // ---------------------------------------------------------------------------
 // Shared shader: `world_grass`
@@ -106,10 +110,27 @@ extern GLint    R_WorldGrassShader_u_mvp;
 extern GLint    R_WorldGrassShader_u_tex;
 extern GLint    R_WorldGrassShader_u_lightmap;
 extern GLint    R_WorldGrassShader_u_alpha;
+extern GLint    R_WorldGrassShader_u_dream_amp;
+extern GLint    R_WorldGrassShader_u_dream_time;
 qboolean R_EnsureWorldGrassShader(void);
 void     Grass_Init(void);
 void     Grass_OnNewMap(void);   // auto-mark textures listed in grass_auto_names
 void     Grass_DrawBlades(void); // second pass: vertical quads over grass-marked surfaces
+
+// ---------------------------------------------------------------------------
+// Flame billboards over lava surfaces. Fully automatic: every world surface
+// whose texture name matches "*lava*" gets a scatter of view-aligned quads
+// drawn via a procedural fire shader. No console commands.
+// ---------------------------------------------------------------------------
+void Flames_Init(void);
+void Flames_Draw(void);  // call after R_DrawWaterSurfaces
+
+// ---------------------------------------------------------------------------
+// Dark-magic aura over alias monsters (not the view model). Uses dual-source
+// blending so a single pass both darkens (cloud edges) and brightens (core).
+// ---------------------------------------------------------------------------
+void Magic_Init(void);
+void Magic_DrawForEntity(entity_t *e);  // call after R_DrawAliasModel(e)
 
 // ---------------------------------------------------------------------------
 // Shared shader: `world_fullbright`

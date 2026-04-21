@@ -213,6 +213,7 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
 		R_SparkShower(pos, vec3_origin);	// Tomaz - Particle System
+		{ extern void Gunshot_Register(const vec3_t); Gunshot_Register(pos); }
 		break;
 		
 	case TE_EXPLOSION:			// rocket explosion

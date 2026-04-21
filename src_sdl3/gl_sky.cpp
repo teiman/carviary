@@ -47,6 +47,94 @@ int		solidskytexture;
 int		alphaskytexture;
 float	speedscale;		// for top sky and bottom sky
 
+// ---------------------------------------------------------------------------
+// Dedicated shader for the near (alpha) sky layer. Same attribute layout as
+// the sprite shader (vec3 pos, vec2 tc) so it plugs into the existing VBO,
+// but the fragment stage multiplies the sampled alpha by a large-scale fbm
+// noise scrolled over time. The effect: big soft "windows" drift across
+// the cloud layer, revealing the far sky underneath. When no window is
+// present, the cloud layer behaves exactly as before.
+// ---------------------------------------------------------------------------
+static GLShader R_SkyAlphaShader;
+static GLint    R_SkyAlphaShader_u_mvp      = -1;
+static GLint    R_SkyAlphaShader_u_tex      = -1;
+static GLint    R_SkyAlphaShader_u_time     = -1;
+static GLint    R_SkyAlphaShader_u_scroll   = -1;   // matches speedscale
+static qboolean skyalpha_shader_ok         = false;
+
+static qboolean R_EnsureSkyAlphaShader (void)
+{
+	if (skyalpha_shader_ok) return true;
+
+	const char *vs =
+		"#version 330 core\n"
+		"layout(location = 0) in vec3 a_pos;\n"
+		"layout(location = 1) in vec2 a_tc;\n"
+		"uniform mat4 u_mvp;\n"
+		"out vec2 v_tc;\n"
+		"out vec2 v_world_xy;\n"      // large-scale coord for the noise
+		"void main() {\n"
+		"    v_tc = a_tc;\n"
+		"    // Use a dir-ish proxy for the noise coord: the (s,t) already\n"
+		"    // encodes the sky dome projection (see EmitSkyPolys_Pass),\n"
+		"    // so feeding it to noise makes the windows track the sky dome.\n"
+		"    v_world_xy = a_tc;\n"
+		"    gl_Position = u_mvp * vec4(a_pos, 1.0);\n"
+		"}\n";
+
+	const char *fs =
+		"#version 330 core\n"
+		"in vec2 v_tc;\n"
+		"in vec2 v_world_xy;\n"
+		"uniform sampler2D u_tex;\n"
+		"uniform float u_time;\n"
+		"uniform float u_scroll;\n"
+		"out vec4 frag_color;\n"
+		"float hash21(vec2 p) {\n"
+		"    p = fract(p * vec2(123.34, 456.21));\n"
+		"    p += dot(p, p + 45.32);\n"
+		"    return fract(p.x * p.y);\n"
+		"}\n"
+		"float vnoise(vec2 p) {\n"
+		"    vec2 i = floor(p);\n"
+		"    vec2 f = fract(p);\n"
+		"    vec2 u = f * f * (3.0 - 2.0 * f);\n"
+		"    float a = hash21(i);\n"
+		"    float b = hash21(i + vec2(1.0, 0.0));\n"
+		"    float c = hash21(i + vec2(0.0, 1.0));\n"
+		"    float d = hash21(i + vec2(1.0, 1.0));\n"
+		"    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);\n"
+		"}\n"
+		"float fbm(vec2 p) {\n"
+		"    float s = 0.0, a = 0.55;\n"
+		"    for (int i = 0; i < 3; ++i) {\n"
+		"        s += vnoise(p) * a;\n"
+		"        p = p * 2.07 + 11.3;\n"
+		"        a *= 0.55;\n"
+		"    }\n"
+		"    return s;\n"
+		"}\n"
+		"void main() {\n"
+		"    vec4 tex = texture(u_tex, v_tc);\n"
+		"    vec2 np = v_world_xy * 4.5 + vec2(u_time * 0.09, -u_time * 0.07);\n"
+		"    float n = fbm(np);\n"
+		"    float window = smoothstep(0.35, 0.60, n);\n"
+		"    frag_color = vec4(tex.rgb, tex.a * window);\n"
+		"}\n";
+
+	char err[512];
+	if (!GLShader_Build(&R_SkyAlphaShader, vs, fs, err, sizeof(err))) {
+		Con_Printf("sky_alpha shader failed: %s\n", err);
+		return false;
+	}
+	R_SkyAlphaShader_u_mvp    = GLShader_Uniform(&R_SkyAlphaShader, "u_mvp");
+	R_SkyAlphaShader_u_tex    = GLShader_Uniform(&R_SkyAlphaShader, "u_tex");
+	R_SkyAlphaShader_u_time   = GLShader_Uniform(&R_SkyAlphaShader, "u_time");
+	R_SkyAlphaShader_u_scroll = GLShader_Uniform(&R_SkyAlphaShader, "u_scroll");
+	skyalpha_shader_ok = true;
+	return true;
+}
+
 
 char	skyname[256];
 char	*suf[6] = {"rt", "bk", "lf", "ft", "up", "dn"};
@@ -147,15 +235,26 @@ void EmitSkyPolys (msurface_t *s)
 	// Pass 1: solid sky, slow scroll.
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, solidskytexture);
-	EmitSkyPolys_Pass(s, 8.0f);
+	EmitSkyPolys_Pass(s, 1.6f);
 
-	// Pass 2: alpha sky, double-speed scroll, blended over pass 1.
+	// Pass 2: alpha sky, double-speed scroll, blended over pass 1. Uses a
+	// dedicated shader that multiplies the sampled alpha by a large-scale
+	// drifting fbm, so soft "windows" open and close over time, revealing
+	// the (blurrier) far layer underneath.
 	GLboolean blend_was_on = glIsEnabled(GL_BLEND);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+	if (R_EnsureSkyAlphaShader()) {
+		GLShader_Use(&R_SkyAlphaShader);
+		glUniformMatrix4fv(R_SkyAlphaShader_u_mvp, 1, GL_FALSE, mvp);
+		glUniform1i       (R_SkyAlphaShader_u_tex, 0);
+		glUniform1f       (R_SkyAlphaShader_u_time, (float)realtime);
+		glUniform1f       (R_SkyAlphaShader_u_scroll, 0.0f);
+	}
+
 	glBindTexture(GL_TEXTURE_2D, alphaskytexture);
-	EmitSkyPolys_Pass(s, 16.0f);
+	EmitSkyPolys_Pass(s, 3.2f);
 
 	if (!blend_was_on) glDisable(GL_BLEND);
 
@@ -348,8 +447,15 @@ void R_InitSky (byte *src, int bytesperpixel)
 	}
 	glBindTexture (GL_TEXTURE_2D, solidskytexture);
 	glTexImage2D (GL_TEXTURE_2D, 0, gl_solid_format, 128, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, trans);
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	// Blurred back layer (the distant sky). Mipmap + LOD bias + hard MIN
+	// LOD floor so the GPU is forced to a small mip regardless of
+	// screen-space texel ratio. Bias alone only kicks in when the
+	// footprint math asks for it; MIN_LOD guarantees a minimum blur.
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, 3.4f);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD,   2.55f); // ~15% less than 3.0
 
 
 	if (bytesperpixel == 4)
@@ -379,7 +485,12 @@ void R_InitSky (byte *src, int bytesperpixel)
 	}
 	glBindTexture (GL_TEXTURE_2D, alphaskytexture);
 	glTexImage2D (GL_TEXTURE_2D, 0, gl_alpha_format, 128, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, trans);
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	// Gentle blur on the near layer so it doesn't look pixel-crisp next to
+	// the softened back layer.
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, 2.0f);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD,   1.6f);
 }
 

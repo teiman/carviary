@@ -49,10 +49,58 @@ cvar_t gl_subdivide_size = {"gl_subdivide_size", "128", true};
 Mod_Init
 ===============
 */
+// ---------------------------------------------------------------------------
+// Derive renderer tags from a model's file name. Runs ONCE per model at
+// load time and caches the result on model_t; per-frame code just reads the
+// flag byte instead of scanning the name string. Keep this cheap and
+// self-contained -- it's called before the subsystems that use the flags
+// exist.
+// ---------------------------------------------------------------------------
+static qboolean Mod_NameContains (const char *name, const char *needle)
+{
+	int nlen = 0; while (needle[nlen]) ++nlen;
+	for (int i = 0; name[i]; ++i) {
+		int k = 0;
+		while (k < nlen && name[i + k]) {
+			char a = name[i + k]; if (a >= 'A' && a <= 'Z') a += 32;
+			char b = needle[k];   if (b >= 'A' && b <= 'Z') b += 32;
+			if (a != b) break;
+			++k;
+		}
+		if (k == nlen) return true;
+	}
+	return false;
+}
+
+static void Mod_DeriveNameFlags (model_t *m)
+{
+	m->magic_aura = 0;
+	if (m->type != mod_alias) return;
+	if (Mod_NameContains(m->name, "fire") ||
+	    Mod_NameContains(m->name, "flame"))
+		m->magic_aura = 1;
+}
+
+// ---------------------------------------------------------------------------
+// modellist: print every currently-loaded model name on one line, space
+// separated. Handy for finding the filename of whatever you're seeing in
+// the world (torches, gibs, pickups, etc).
+// ---------------------------------------------------------------------------
+static void Mod_ListCmd_f (void)
+{
+	if (mod_numknown == 0) { Con_Printf("(no models loaded)\n"); return; }
+	for (int i = 0; i < mod_numknown; ++i) {
+		if (i) Con_Printf(" ");
+		Con_Printf("%s", mod_known[i].name);
+	}
+	Con_Printf("\n%d model(s)\n", mod_numknown);
+}
+
 void Mod_Init (void)
 {
 	Cvar_RegisterVariable (&gl_subdivide_size);
 	memset (mod_novis, 0xff, sizeof(mod_novis));
+	Cmd_AddCommand ("modellist", Mod_ListCmd_f);
 }
 
 /*
@@ -336,6 +384,7 @@ model_t *Mod_LoadModel (model_t *mod, qboolean crash)
 		break;
 	}
 
+	Mod_DeriveNameFlags (mod);
 	return mod;
 }
 

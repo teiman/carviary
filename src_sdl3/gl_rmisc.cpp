@@ -86,6 +86,8 @@ void R_Init (void)
 	Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);	
 	Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
 
+	extern cvar_t r_dream_amp;
+	Cvar_RegisterVariable (&r_dream_amp);
 	Cvar_RegisterVariable (&r_norefresh);
 	Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_wateralpha);
@@ -128,6 +130,16 @@ void R_Init (void)
 	// Flashlight ("lamp on" / "lamp off").
 	extern void Lamp_Init (void);
 	Lamp_Init();
+
+	// Flame billboards over lava surfaces (automatic, no commands).
+	Flames_Init();
+
+	// Dark-magic aura on alias monsters.
+	Magic_Init();
+
+	// Gunshot wall decals (first iteration: debug markers only).
+	extern void Gunshot_Init(void);
+	Gunshot_Init();
 
 	Prof_Init ();
 }

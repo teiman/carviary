@@ -25,6 +25,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_mat4.h"
 #include "gl_profiler.h"
 
+// Dream warp: per-vertex 3D-noise displacement in the world shaders. Controls
+// the world geometry "breathing" effect. 0 = disabled. Registered from
+// gl_rmisc.cpp via R_Init so it survives between levels.
+cvar_t r_dream_amp = {"r_dream_amp", "0"};
+
 // World rendering: one streaming VBO reused per surface draw. Each surface is
 // a fan of N verts; we re-triangulate to N-2 triangles on upload.
 typedef struct {
@@ -471,6 +476,8 @@ void R_DrawBrushMTex (msurface_t *s)
 	glUniform1i(u_tex, 0);
 	glUniform1i(u_lm, 1);
 	glUniform1f(u_a, 1.0f);
+	glUniform1f(fence ? R_WorldFenceShader_u_dream_amp  : R_WorldOpaqueShader_u_dream_amp,  r_dream_amp.value);
+	glUniform1f(fence ? R_WorldFenceShader_u_dream_time : R_WorldOpaqueShader_u_dream_time, 0.0f);
 
 	DynamicVBO_Upload(&world_vbo, soup, (GLsizei)(n * sizeof(world_vtx_t)));
 	DynamicVBO_Bind(&world_vbo);
@@ -1358,6 +1365,17 @@ static void R_EmitTextureChains (model_t *texmodel)
 			glUniform1i(u_tex, 0);
 			glUniform1i(u_lm, 1);
 			glUniform1f(u_a, 1.0f);
+			// Dream warp uniforms. Each of the three world shaders
+			// (opaque/fence/grass) has its own pair; set them per the
+			// currently-selected shader_kind.
+			GLint u_damp  = grass ? R_WorldGrassShader_u_dream_amp
+			              : fence ? R_WorldFenceShader_u_dream_amp
+			                      : R_WorldOpaqueShader_u_dream_amp;
+			GLint u_dtime = grass ? R_WorldGrassShader_u_dream_time
+			              : fence ? R_WorldFenceShader_u_dream_time
+			                      : R_WorldOpaqueShader_u_dream_time;
+			glUniform1f(u_damp,  r_dream_amp.value);
+			glUniform1f(u_dtime, 0.0f);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, t->gl_texturenum);
 			last_t = t;

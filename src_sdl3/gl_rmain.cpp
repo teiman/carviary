@@ -474,6 +474,7 @@ transgetent:
 	case mod_alias:
 		Prof_BeginSection (PROF_CPU_ALIAS);
 		R_DrawAliasModel  (currententity, true);
+		Magic_DrawForEntity (currententity);
 		Prof_EndSection (PROF_CPU_ALIAS);
 		break;
 	case mod_brush:
@@ -886,6 +887,7 @@ void R_RenderScene (void)
 		}
 		Prof_BeginSection (PROF_CPU_WATER);
 		R_DrawWaterSurfaces (); // Tomaz - fixing particle / water bug
+		Flames_Draw();          // procedural flame billboards over lava
 		Prof_EndSection (PROF_CPU_WATER);
 		R_SortTransEntities (false);
 		if (gl_particles.value) {
@@ -904,6 +906,7 @@ void R_RenderScene (void)
 		}
 		Prof_BeginSection (PROF_CPU_WATER);
 		R_DrawWaterSurfaces ();	// Tomaz - fixing particle / water bug
+		Flames_Draw();          // procedural flame billboards over lava
 		Prof_EndSection (PROF_CPU_WATER);
 		R_SortTransEntities (true);
 		if (gl_particles.value) {
@@ -912,6 +915,12 @@ void R_RenderScene (void)
 			Prof_EndSection (PROF_CPU_PARTICLES);
 		}
 	}
+
+	// Gunshot impact glow + smoke. Drawn AFTER every trans-entity pass so
+	// monsters, pickups and other alias models (which all route through
+	// R_SortTransEntities, including the alpha=1 ones) are already on
+	// screen with correct depth -- the smoke just composites on top.
+	{ extern void Gunshot_Draw(void); Gunshot_Draw(); }
 
 	if (r_speeds.value)
 	{

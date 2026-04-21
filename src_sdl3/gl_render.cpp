@@ -38,16 +38,20 @@ GLint    R_AliasShader_u_dot_row_ceil     = -1;
 GLint    R_AliasShader_u_dot_row_floor    = -1;
 
 GLShader R_WorldOpaqueShader;
-GLint    R_WorldOpaqueShader_u_mvp      = -1;
-GLint    R_WorldOpaqueShader_u_tex      = -1;
-GLint    R_WorldOpaqueShader_u_lightmap = -1;
-GLint    R_WorldOpaqueShader_u_alpha    = -1;
+GLint    R_WorldOpaqueShader_u_mvp        = -1;
+GLint    R_WorldOpaqueShader_u_tex        = -1;
+GLint    R_WorldOpaqueShader_u_lightmap   = -1;
+GLint    R_WorldOpaqueShader_u_alpha      = -1;
+GLint    R_WorldOpaqueShader_u_dream_amp  = -1;
+GLint    R_WorldOpaqueShader_u_dream_time = -1;
 
 GLShader R_WorldFenceShader;
-GLint    R_WorldFenceShader_u_mvp      = -1;
-GLint    R_WorldFenceShader_u_tex      = -1;
-GLint    R_WorldFenceShader_u_lightmap = -1;
-GLint    R_WorldFenceShader_u_alpha    = -1;
+GLint    R_WorldFenceShader_u_mvp        = -1;
+GLint    R_WorldFenceShader_u_tex        = -1;
+GLint    R_WorldFenceShader_u_lightmap   = -1;
+GLint    R_WorldFenceShader_u_alpha      = -1;
+GLint    R_WorldFenceShader_u_dream_amp  = -1;
+GLint    R_WorldFenceShader_u_dream_time = -1;
 
 GLShader R_WorldFullbrightShader;
 GLint    R_WorldFullbrightShader_u_mvp = -1;
@@ -355,18 +359,65 @@ qboolean R_EnsureAliasShader(void)
 
 // ---------------------------------------------------------------------------
 // World shaders share the same vertex layout, so build from a common source.
+//
+// Dream warp: when u_dream_amp > 0, every vertex is displaced by a 3D value
+// noise sampled at its world position (optionally time-animated via
+// u_dream_time). The offset is a pure function of (a_pos, u_dream_time), so
+// vertices shared between adjacent surfaces get identical displacements and
+// the seams stay closed -- Quake BSP vertex positions are integer-valued in
+// world units, so there is no float divergence to worry about.
 static const char *world_vs_src =
 	"#version 330 core\n"
 	"layout(location = 0) in vec3 a_pos;\n"
 	"layout(location = 1) in vec2 a_tc;\n"
 	"layout(location = 2) in vec2 a_lmtc;\n"
-	"uniform mat4 u_mvp;\n"
+	"uniform mat4  u_mvp;\n"
+	"uniform float u_dream_amp;\n"    // 0 = no warp; units of world displacement
+	"uniform float u_dream_time;\n"   // seconds; adds a slow breathing motion
 	"out vec2 v_tc;\n"
 	"out vec2 v_lmtc;\n"
+	"\n"
+	"float dream_hash31(vec3 p) {\n"
+	"    p = fract(p * vec3(0.1031, 0.1030, 0.0973));\n"
+	"    p += dot(p, p.yxz + 33.33);\n"
+	"    return fract((p.x + p.y) * p.z);\n"
+	"}\n"
+	"float dream_vnoise3(vec3 p) {\n"
+	"    vec3 i = floor(p);\n"
+	"    vec3 f = fract(p);\n"
+	"    f = f * f * (3.0 - 2.0 * f);\n"
+	"    float a = dream_hash31(i + vec3(0,0,0));\n"
+	"    float b = dream_hash31(i + vec3(1,0,0));\n"
+	"    float c = dream_hash31(i + vec3(0,1,0));\n"
+	"    float d = dream_hash31(i + vec3(1,1,0));\n"
+	"    float e = dream_hash31(i + vec3(0,0,1));\n"
+	"    float g = dream_hash31(i + vec3(1,0,1));\n"
+	"    float h = dream_hash31(i + vec3(0,1,1));\n"
+	"    float k = dream_hash31(i + vec3(1,1,1));\n"
+	"    return mix(mix(mix(a,b,f.x), mix(c,d,f.x), f.y),\n"
+	"               mix(mix(e,g,f.x), mix(h,k,f.x), f.y), f.z);\n"
+	"}\n"
+	"\n"
+	"vec3 dream_offset(vec3 wp, float t) {\n"
+	"    // Spatial frequency ~0.015/unit -> one wavelength per ~66 units,\n"
+	"    // comfortable at Quake interior scale (corridor widths 128-256).\n"
+	"    vec3 q = wp * 0.015 + vec3(t * 0.07, -t * 0.05, t * 0.04);\n"
+	"    // Three independent samples (offset in lattice) -> a smooth 3D\n"
+	"    // vector field. -0.5 so the noise centers around 0 instead of 0.5.\n"
+	"    float nx = dream_vnoise3(q + vec3(  0,   0,   0)) - 0.5;\n"
+	"    float ny = dream_vnoise3(q + vec3(31,  17,   5)) - 0.5;\n"
+	"    float nz = dream_vnoise3(q + vec3(73,  41, 101)) - 0.5;\n"
+	"    return vec3(nx, ny, nz) * 2.0;\n"    // rescale to ~[-1, 1]
+	"}\n"
+	"\n"
 	"void main() {\n"
+	"    vec3 pos = a_pos;\n"
+	"    if (u_dream_amp > 0.0) {\n"
+	"        pos += dream_offset(a_pos, u_dream_time) * u_dream_amp;\n"
+	"    }\n"
 	"    v_tc = a_tc;\n"
 	"    v_lmtc = a_lmtc;\n"
-	"    gl_Position = u_mvp * vec4(a_pos, 1.0);\n"
+	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
 	"}\n";
 
 qboolean R_EnsureWorldOpaqueShader(void)
@@ -392,10 +443,12 @@ qboolean R_EnsureWorldOpaqueShader(void)
 		Con_Printf("world_opaque shader failed: %s\n", err);
 		return false;
 	}
-	R_WorldOpaqueShader_u_mvp      = GLShader_Uniform(&R_WorldOpaqueShader, "u_mvp");
-	R_WorldOpaqueShader_u_tex      = GLShader_Uniform(&R_WorldOpaqueShader, "u_tex");
-	R_WorldOpaqueShader_u_lightmap = GLShader_Uniform(&R_WorldOpaqueShader, "u_lightmap");
-	R_WorldOpaqueShader_u_alpha    = GLShader_Uniform(&R_WorldOpaqueShader, "u_alpha");
+	R_WorldOpaqueShader_u_mvp        = GLShader_Uniform(&R_WorldOpaqueShader, "u_mvp");
+	R_WorldOpaqueShader_u_tex        = GLShader_Uniform(&R_WorldOpaqueShader, "u_tex");
+	R_WorldOpaqueShader_u_lightmap   = GLShader_Uniform(&R_WorldOpaqueShader, "u_lightmap");
+	R_WorldOpaqueShader_u_alpha      = GLShader_Uniform(&R_WorldOpaqueShader, "u_alpha");
+	R_WorldOpaqueShader_u_dream_amp  = GLShader_Uniform(&R_WorldOpaqueShader, "u_dream_amp");
+	R_WorldOpaqueShader_u_dream_time = GLShader_Uniform(&R_WorldOpaqueShader, "u_dream_time");
 	world_opaque_ok = true;
 	return true;
 }
@@ -424,10 +477,12 @@ qboolean R_EnsureWorldFenceShader(void)
 		Con_Printf("world_fence shader failed: %s\n", err);
 		return false;
 	}
-	R_WorldFenceShader_u_mvp      = GLShader_Uniform(&R_WorldFenceShader, "u_mvp");
-	R_WorldFenceShader_u_tex      = GLShader_Uniform(&R_WorldFenceShader, "u_tex");
-	R_WorldFenceShader_u_lightmap = GLShader_Uniform(&R_WorldFenceShader, "u_lightmap");
-	R_WorldFenceShader_u_alpha    = GLShader_Uniform(&R_WorldFenceShader, "u_alpha");
+	R_WorldFenceShader_u_mvp        = GLShader_Uniform(&R_WorldFenceShader, "u_mvp");
+	R_WorldFenceShader_u_tex        = GLShader_Uniform(&R_WorldFenceShader, "u_tex");
+	R_WorldFenceShader_u_lightmap   = GLShader_Uniform(&R_WorldFenceShader, "u_lightmap");
+	R_WorldFenceShader_u_alpha      = GLShader_Uniform(&R_WorldFenceShader, "u_alpha");
+	R_WorldFenceShader_u_dream_amp  = GLShader_Uniform(&R_WorldFenceShader, "u_dream_amp");
+	R_WorldFenceShader_u_dream_time = GLShader_Uniform(&R_WorldFenceShader, "u_dream_time");
 	world_fence_ok = true;
 	return true;
 }

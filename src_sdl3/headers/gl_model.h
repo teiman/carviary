@@ -339,6 +339,10 @@ typedef struct model_s
 	qboolean	noshadow;
 	qboolean	fullbright;
 
+	// Renderer flags derived once at load time from the model name (see
+	// Mod_DeriveNameFlags in gl_model.cpp). Avoids per-frame string scans.
+	byte		magic_aura;     // dark-magic heat aura on alias entities using this model
+
 	int			flags;
 
 //

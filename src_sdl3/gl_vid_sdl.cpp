@@ -288,6 +288,23 @@ void VID_Init (unsigned char *palette)
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
+	// ----- OBS / capture-friendly hints -----
+	// When the window gains focus, Windows 11 can promote a borderless GL
+	// window to "independent flip" / fullscreen optimizations. That path
+	// bypasses DWM, which breaks OBS BitBlt and "Windows 10" capture
+	// modes -- the captured image freezes as soon as the window is
+	// focused. Force a DWM-composited path so every swap passes through
+	// DWM and is visible to window-capture APIs.
+	SDL_SetHint("SDL_VIDEO_FORCE_EGL", "0");
+	// Ask Windows not to apply fullscreen optimizations to this process.
+	// SDL3 propagates this to the HWND via DwmSetWindowAttribute.
+	SDL_SetHint("SDL_HINT_VIDEO_WINDOWS_DISABLE_FULLSCREEN_OPTIMIZATIONS", "1");
+	// Don't let SDL flip into exclusive fullscreen under any flag.
+	SDL_SetHint("SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR", "0"); // win32: ignored
+	// Some drivers hand out a flip-model swapchain when the title is
+	// "DXGI-eligible". Opt out so OBS BitBlt sees a blit-model window.
+	SDL_SetHint("SDL_VIDEO_WIN_D3DCOMPILER", "none");
+
 	// ----- create window -----
 	sdl_window = SDL_CreateWindow("Carviary", width, height, flags);
 
