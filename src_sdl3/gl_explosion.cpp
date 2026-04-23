@@ -632,8 +632,34 @@ static void Explosion_TriggerFlash (const vec3_t origin)
 	cl.cshifts[CSHIFT_BONUS].percent      = total;
 }
 
+// Short warm dlight at the blast origin. Key uses the core slot so repeated
+// explosions at the same spot overwrite rather than piling up dlight slots.
+static void Explosion_SpawnDlight (const vec3_t origin, int tint, int key)
+{
+	extern dlight_t *CL_AllocDlight (int key);
+	dlight_t *dl = CL_AllocDlight(-key - 1);   // negative keys don't collide with entity-id dlights
+	if (!dl) return;
+	VectorCopy(origin, dl->origin);
+	dl->radius   = 180.0f;       // small-ish; big enough to flicker a nearby wall
+	dl->die      = cl.time + 0.35f;
+	dl->decay    = 400.0f;       // fade radius over its life
+	dl->minlight = 0;
+	if (tint == 1) {
+		// Tarbaby: magenta/violet.
+		dl->color[0] = 0.85f;
+		dl->color[1] = 0.25f;
+		dl->color[2] = 1.00f;
+	} else {
+		// Rocket: warm yellow-orange.
+		dl->color[0] = 1.00f;
+		dl->color[1] = 0.70f;
+		dl->color[2] = 0.30f;
+	}
+}
+
 void Explosion_Spawn (const vec3_t origin, int tint /* 0=rocket, 1=tarbaby */)
 {
+	int slot = g_core_head;
 	core_t *c = &g_cores[g_core_head];
 	g_core_head = (g_core_head + 1) % EXPL_MAX;
 	VectorCopy(origin, c->pos);
@@ -644,6 +670,7 @@ void Explosion_Spawn (const vec3_t origin, int tint /* 0=rocket, 1=tarbaby */)
 	Explosion_SpawnSparks(origin);
 	Explosion_TriggerFlash(origin);
 	Explosion_ScheduleShrapnel(origin);
+	Explosion_SpawnDlight(origin, tint, slot);
 }
 
 // ---------------------------------------------------------------------------

@@ -641,7 +641,7 @@ void CL_RelinkEntities (void)
 				R_TrueTrail_Missile (oldorg, ent->origin, ent);
 				dl = CL_AllocDlight (i);
 				VectorCopy (ent->origin, dl->origin);
-				dl->radius = 250;
+				dl->radius = 120;
 				dl->die = cl.time + 0.01;
 			}
 			else if (ent->model->flags & EF_GRENADE)
