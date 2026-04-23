@@ -58,11 +58,27 @@ GLint    R_WorldFullbrightShader_u_mvp = -1;
 GLint    R_WorldFullbrightShader_u_tex = -1;
 
 GLShader R_WorldWaterShader;
-GLint    R_WorldWaterShader_u_mvp   = -1;
-GLint    R_WorldWaterShader_u_tex   = -1;
-GLint    R_WorldWaterShader_u_time  = -1;
-GLint    R_WorldWaterShader_u_alpha = -1;
+GLint    R_WorldWaterShader_u_mvp            = -1;
+GLint    R_WorldWaterShader_u_tex            = -1;
+GLint    R_WorldWaterShader_u_time           = -1;
+GLint    R_WorldWaterShader_u_alpha          = -1;
+// Shoreline darkening: per-face AABB + exterior-side mask. The shader
+// darkens only near sides flagged as "exterior" (touching wall/floor),
+// leaving edges shared with another water face untouched.
+GLint    R_WorldWaterShader_u_tc_min         = -1;
+GLint    R_WorldWaterShader_u_tc_max         = -1;
+GLint    R_WorldWaterShader_u_shore_ext      = -1;   // vec4: min_s, max_s, min_t, max_t (0/1)
+GLint    R_WorldWaterShader_u_shore_width    = -1;
+GLint    R_WorldWaterShader_u_shore_strength = -1;
+// Cloud noise modulation (coarse Gaussian-ish fBm in world space).
+GLint    R_WorldWaterShader_u_cloud_scale    = -1;
+GLint    R_WorldWaterShader_u_cloud_amp      = -1;
+GLint    R_WorldWaterShader_u_cloud_speed    = -1;
 
+// Shoreline darkening: second pass over water geometry that samples the
+// scene's depth texture and darkens pixels where the water is shallow
+// (i.e. the depth difference between water fragment and scene fragment is
+// small -> water is close to the ground/wall below it).
 static qboolean particle_ok         = false;
 static qboolean hud2d_ok            = false;
 static qboolean sprite_ok           = false;
@@ -92,8 +108,12 @@ qboolean R_EnsureParticleShader(void)
 	const char *fs =
 		"#version 330 core\n"
 		"in vec4 v_color;\n"
-		"out vec4 frag_color;\n"
-		"void main() { frag_color = v_color; }\n";
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
+		"void main() {\n"
+		"    frag_color = v_color;\n"
+		"    frag_fbmask = vec4(0.0);\n"
+		"}\n";
 
 	char err[512];
 	if (!GLShader_Build(&R_ParticleShader, vs, fs, err, sizeof(err))) {
@@ -129,8 +149,12 @@ qboolean R_EnsureHud2dShader(void)
 		"in vec2 v_tc;\n"
 		"in vec4 v_color;\n"
 		"uniform sampler2D u_tex;\n"
-		"out vec4 frag_color;\n"
-		"void main() { frag_color = texture(u_tex, v_tc) * v_color; }\n";
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
+		"void main() {\n"
+		"    frag_color = texture(u_tex, v_tc) * v_color;\n"
+		"    frag_fbmask = vec4(0.0);\n"
+		"}\n";
 
 	char err[512];
 	if (!GLShader_Build(&R_Hud2dShader, vs, fs, err, sizeof(err))) {
@@ -164,8 +188,12 @@ qboolean R_EnsureSpriteShader(void)
 		"in vec2 v_tc;\n"
 		"uniform sampler2D u_tex;\n"
 		"uniform vec4 u_color;\n"
-		"out vec4 frag_color;\n"
-		"void main() { frag_color = texture(u_tex, v_tc) * u_color; }\n";
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
+		"void main() {\n"
+		"    frag_color = texture(u_tex, v_tc) * u_color;\n"
+		"    frag_fbmask = vec4(0.0);\n"
+		"}\n";
 
 	char err[512];
 	if (!GLShader_Build(&R_SpriteShader, vs, fs, err, sizeof(err))) {
@@ -193,8 +221,12 @@ qboolean R_EnsureFullscreenShader(void)
 	const char *fs =
 		"#version 330 core\n"
 		"uniform vec4 u_color;\n"
-		"out vec4 frag_color;\n"
-		"void main() { frag_color = u_color; }\n";
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
+		"void main() {\n"
+		"    frag_color = u_color;\n"
+		"    frag_fbmask = vec4(0.0);\n"
+		"}\n";
 
 	char err[512];
 	if (!GLShader_Build(&R_FullscreenShader, vs, fs, err, sizeof(err))) {
@@ -309,8 +341,17 @@ qboolean R_EnsureAliasShader(void)
 		"in vec2 v_tc;\n"
 		"in vec4 v_color;\n"
 		"uniform sampler2D u_tex;\n"
-		"out vec4 frag_color;\n"
-		"void main() { frag_color = texture(u_tex, v_tc) * v_color; }\n";
+		"uniform int u_fullbright;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
+		"void main() {\n"
+		"    vec4 c = texture(u_tex, v_tc) * v_color;\n"
+		"    frag_color  = c;\n"
+		"    // Mask: RGB = premultiplied emission, alpha = emitter depth.\n"
+		"    // Non-fullbright alias passes write zeros to clear any glow\n"
+		"    // tag a previous pass left behind at this pixel.\n"
+		"    frag_fbmask = (u_fullbright != 0) ? vec4(c.rgb, gl_FragCoord.z) : vec4(0.0);\n"
+		"}\n";
 
 	char err[1024];
 	if (!GLShader_Build(&R_AliasShader, vs, fs, err, sizeof(err))) {
@@ -431,11 +472,16 @@ qboolean R_EnsureWorldOpaqueShader(void)
 		"uniform sampler2D u_tex;\n"
 		"uniform sampler2D u_lightmap;\n"
 		"uniform float u_alpha;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"void main() {\n"
 		"    vec4 diffuse = texture(u_tex, v_tc);\n"
 		"    vec4 lm = texture(u_lightmap, v_lmtc);\n"
 		"    frag_color = vec4(diffuse.rgb * lm.rgb, diffuse.a * u_alpha);\n"
+		"    // Opaque world. Writing 0 here clears any fullbright tag\n"
+		"    // the underlying pixel may have had from an earlier pass,\n"
+		"    // so door/brushmodel occluders don't leak glow through.\n"
+		"    frag_fbmask = vec4(0.0);\n"
 		"}\n";
 
 	char err[512];
@@ -464,12 +510,14 @@ qboolean R_EnsureWorldFenceShader(void)
 		"uniform sampler2D u_tex;\n"
 		"uniform sampler2D u_lightmap;\n"
 		"uniform float u_alpha;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"void main() {\n"
 		"    vec4 diffuse = texture(u_tex, v_tc);\n"
 		"    if (diffuse.a < 0.666) discard;\n"
 		"    vec4 lm = texture(u_lightmap, v_lmtc);\n"
 		"    frag_color = vec4(diffuse.rgb * lm.rgb, diffuse.a * u_alpha);\n"
+		"    frag_fbmask = vec4(0.0);\n"
 		"}\n";
 
 	char err[512];
@@ -497,8 +545,10 @@ qboolean R_EnsureWorldWaterShader(void)
 		"layout(location = 1) in vec2 a_tc;\n"
 		"uniform mat4 u_mvp;\n"
 		"out vec2 v_tc;\n"
+		"out vec3 v_world;\n"
 		"void main() {\n"
 		"    v_tc = a_tc;\n"
+		"    v_world = a_pos;\n"
 		"    gl_Position = u_mvp * vec4(a_pos, 1.0);\n"
 		"}\n";
 
@@ -526,17 +576,88 @@ qboolean R_EnsureWorldWaterShader(void)
 	const char *fs =
 		"#version 330 core\n"
 		"in vec2 v_tc;\n"
+		"in vec3 v_world;\n"
 		"uniform sampler2D u_tex;\n"
+		"uniform vec2  u_tc_min;\n"        // face AABB min in tangent space
+		"uniform vec2  u_tc_max;\n"        // face AABB max in tangent space
+		"uniform vec4  u_shore_ext;\n"     // per-side 0/1: (min_s, max_s, min_t, max_t)
+		"uniform float u_shore_width;\n"   // gradient width in tangent-space units
+		"uniform float u_shore_strength;\n"// peak darkening at the edge (0..1)
+		"uniform float u_cloud_scale;\n"   // world-space size of one noise cell
+		"uniform float u_cloud_amp;\n"     // 0..1, peak darkening/lightening
+		"uniform float u_cloud_speed;\n"   // world units per second of drift
 		"uniform float u_time;\n"
 		"uniform float u_alpha;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
+		// ---- cheap 3D value noise + fBm, sampled in world space ----
+		"float hash31(vec3 p) {\n"
+		"    p = fract(p * 0.3183099 + 0.1);\n"
+		"    p *= 17.0;\n"
+		"    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));\n"
+		"}\n"
+		"float vnoise3(vec3 p) {\n"
+		"    vec3 i = floor(p);\n"
+		"    vec3 f = fract(p);\n"
+		"    f = f * f * (3.0 - 2.0 * f);\n"
+		"    float n000 = hash31(i + vec3(0,0,0));\n"
+		"    float n100 = hash31(i + vec3(1,0,0));\n"
+		"    float n010 = hash31(i + vec3(0,1,0));\n"
+		"    float n110 = hash31(i + vec3(1,1,0));\n"
+		"    float n001 = hash31(i + vec3(0,0,1));\n"
+		"    float n101 = hash31(i + vec3(1,0,1));\n"
+		"    float n011 = hash31(i + vec3(0,1,1));\n"
+		"    float n111 = hash31(i + vec3(1,1,1));\n"
+		"    float nx00 = mix(n000, n100, f.x);\n"
+		"    float nx10 = mix(n010, n110, f.x);\n"
+		"    float nx01 = mix(n001, n101, f.x);\n"
+		"    float nx11 = mix(n011, n111, f.x);\n"
+		"    float nxy0 = mix(nx00, nx10, f.y);\n"
+		"    float nxy1 = mix(nx01, nx11, f.y);\n"
+		"    return mix(nxy0, nxy1, f.z);\n"
+		"}\n"
+		"float fbm3(vec3 p) {\n"
+		"    float s = 0.0;\n"
+		"    float a = 0.5;\n"
+		"    for (int i = 0; i < 3; ++i) {\n"
+		"        s += a * vnoise3(p);\n"
+		"        p *= 2.03;\n"
+		"        a *= 0.5;\n"
+		"    }\n"
+		"    return s;\n"
+		"}\n"
 		"void main() {\n"
 		"    float os = v_tc.x;\n"
 		"    float ot = v_tc.y;\n"
 		"    float r_s = (os + 8.0 * sin(ot * 0.03125 + u_time)) * 0.015625;\n"
 		"    float r_t = (ot + 8.0 * sin(os * 0.03125 + u_time)) * 0.015625;\n"
 		"    vec4 c = texture(u_tex, vec2(r_s, r_t));\n"
-		"    frag_color = vec4(c.rgb, c.a * u_alpha);\n"
+		// Per-side proximity, each cast to 1 at the side and 0 at u_shore_width
+		// away. Interior sides (mask bit = 0) contribute nothing, so two
+		// adjacent water faces show no darkening at their shared edge.
+		"    float w = max(u_shore_width, 1.0);\n"
+		"    float pl = u_shore_ext.x * clamp(1.0 - (v_tc.x - u_tc_min.x) / w, 0.0, 1.0);\n"
+		"    float pr = u_shore_ext.y * clamp(1.0 - (u_tc_max.x - v_tc.x) / w, 0.0, 1.0);\n"
+		"    float pb = u_shore_ext.z * clamp(1.0 - (v_tc.y - u_tc_min.y) / w, 0.0, 1.0);\n"
+		"    float pt = u_shore_ext.w * clamp(1.0 - (u_tc_max.y - v_tc.y) / w, 0.0, 1.0);\n"
+		"    float shore = max(max(pl, pr), max(pb, pt));\n"
+		"    float darken = 1.0 - shore * u_shore_strength;\n"
+		// Gaussian-like cloud noise modulation. Sampled in world space so it
+		// looks attached to the world, not the camera. Drift by time for
+		// slow breathing. vnoise3 returns ~[0..1]; fbm3 with 3 octaves and
+		// 0.5 falloff ends up ~[0..1] too. Bias to [-1..+1] and scale.
+		"    float s = max(u_cloud_scale, 1.0);\n"
+		"    vec3  np = v_world / s + vec3(u_time * u_cloud_speed * 0.1,\n"
+		"                                  u_time * u_cloud_speed * 0.07,\n"
+		"                                  u_time * u_cloud_speed * 0.13);\n"
+		// fbm3 with 3 octaves sits roughly in [0.15, 0.75]. Remap to [-1, 1]
+		// so u_cloud_amp has its full intended effect.
+		"    float raw = fbm3(np);\n"
+		"    float n = clamp((raw - 0.45) / 0.30, -1.0, 1.0);\n"
+		"    float cloud = 1.0 + n * u_cloud_amp;\n"
+		"    vec3 rgb = c.rgb * darken * cloud;\n"
+		"    frag_color = vec4(rgb, c.a * u_alpha);\n"
+		"    frag_fbmask = vec4(0.0);\n"
 		"}\n";
 
 	char err[512];
@@ -544,10 +665,18 @@ qboolean R_EnsureWorldWaterShader(void)
 		Con_Printf("world_water shader failed: %s\n", err);
 		return false;
 	}
-	R_WorldWaterShader_u_mvp   = GLShader_Uniform(&R_WorldWaterShader, "u_mvp");
-	R_WorldWaterShader_u_tex   = GLShader_Uniform(&R_WorldWaterShader, "u_tex");
-	R_WorldWaterShader_u_time  = GLShader_Uniform(&R_WorldWaterShader, "u_time");
-	R_WorldWaterShader_u_alpha = GLShader_Uniform(&R_WorldWaterShader, "u_alpha");
+	R_WorldWaterShader_u_mvp            = GLShader_Uniform(&R_WorldWaterShader, "u_mvp");
+	R_WorldWaterShader_u_tex            = GLShader_Uniform(&R_WorldWaterShader, "u_tex");
+	R_WorldWaterShader_u_time           = GLShader_Uniform(&R_WorldWaterShader, "u_time");
+	R_WorldWaterShader_u_alpha          = GLShader_Uniform(&R_WorldWaterShader, "u_alpha");
+	R_WorldWaterShader_u_tc_min         = GLShader_Uniform(&R_WorldWaterShader, "u_tc_min");
+	R_WorldWaterShader_u_tc_max         = GLShader_Uniform(&R_WorldWaterShader, "u_tc_max");
+	R_WorldWaterShader_u_shore_ext      = GLShader_Uniform(&R_WorldWaterShader, "u_shore_ext");
+	R_WorldWaterShader_u_shore_width    = GLShader_Uniform(&R_WorldWaterShader, "u_shore_width");
+	R_WorldWaterShader_u_shore_strength = GLShader_Uniform(&R_WorldWaterShader, "u_shore_strength");
+	R_WorldWaterShader_u_cloud_scale    = GLShader_Uniform(&R_WorldWaterShader, "u_cloud_scale");
+	R_WorldWaterShader_u_cloud_amp      = GLShader_Uniform(&R_WorldWaterShader, "u_cloud_amp");
+	R_WorldWaterShader_u_cloud_speed    = GLShader_Uniform(&R_WorldWaterShader, "u_cloud_speed");
 	world_water_ok = true;
 	return true;
 }
@@ -571,13 +700,17 @@ qboolean R_EnsureWorldFullbrightShader(void)
 		"#version 330 core\n"
 		"in vec2 v_tc;\n"
 		"uniform sampler2D u_tex;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"void main() {\n"
 		"    vec4 t = texture(u_tex, v_tc);\n"
-		"    // Fullbright masks use alpha=0 for non-glowing pixels. With\n"
-		"    // additive blending (ONE,ONE) we must premultiply by alpha or\n"
-		"    // the transparent RGB leaks into the result as extra brightness.\n"
-		"    frag_color = vec4(t.rgb * t.a, t.a);\n"
+		"    vec3 c = t.rgb * t.a;\n"
+		"    frag_color  = vec4(c, t.a);\n"
+		"    // Mask stores premultiplied color in RGB and the emitter's\n"
+		"    // clip-space depth [0,1] in alpha. The composite compares\n"
+		"    // the blurred alpha against the main scene's depth to reject\n"
+		"    // glow that would appear on top of an occluder.\n"
+		"    frag_fbmask = vec4(c, gl_FragCoord.z);\n"
 		"}\n";
 
 	char err[512];

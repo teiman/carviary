@@ -221,6 +221,7 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
 		R_ParticleExplosion (pos);
+		{ extern void Explosion_Spawn(const vec3_t, int); Explosion_Spawn(pos, 0); }
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 300;
@@ -235,6 +236,7 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
 		R_ParticleExplosion (pos);
+		{ extern void Explosion_Spawn(const vec3_t, int); Explosion_Spawn(pos, 1); }
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->color[0]	= 1;

@@ -1067,8 +1067,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	mod->glow_radius = 0.0f;
 	VectorClear (mod->glow_color);
 
-	if ((!strcmp (mod->name, "progs/missile.mdl")) ||
-		(!strcmp (mod->name, "progs/plasma.mdl")))
+	if (!strcmp (mod->name, "progs/plasma.mdl"))
 		mod->glow_radius = 6.0f;
 	else if ((!strncmp (mod->name, "progs/glow_", 11)) ||
 			(!strncmp (mod->name, "progs/bolt", 10))  ||
@@ -1149,5 +1148,12 @@ void GL_DrawAliasBlendedFrame (int frame, aliashdr_t *paliashdr, entity_t* e)
 {
 	if (paliashdr->gpu_ssbo_poses == 0)
 		return; // Alias_BuildGPUData didn't run or failed for this model
+
+	// When the whole model is fullbright (progs/flame*.mdl, lavaball,
+	// etc.) every pixel it writes belongs in the glow mask. The caller
+	// also enables this wrapper for the fb_texturenum second-pass overlay.
+	qboolean route_to_mask = (e && e->model && e->model->fullbright);
+	if (route_to_mask) PostFX_BeginFullbrightMask();
 	GL_DrawAliasBlendedFrame_Impl(frame, paliashdr, e);
+	if (route_to_mask) PostFX_EndFullbrightMask();
 }

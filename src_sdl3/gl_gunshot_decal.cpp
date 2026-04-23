@@ -251,16 +251,18 @@ static qboolean R_EnsureGlowShader (void)
 		"in vec2 v_uv;\n"
 		"uniform vec3  u_color;\n"
 		"uniform float u_alpha;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"void main() {\n"
 		"    vec2 d = v_uv - 0.5;\n"
 		"    float r2 = dot(d, d);\n"
 		"    if (r2 > 0.25) discard;\n"
-		"    // Sharp-ish core, soft edge.\n"
 		"    float core = 1.0 - smoothstep(0.0, 0.06, r2);\n"
 		"    float halo = 1.0 - smoothstep(0.06, 0.25, r2);\n"
 		"    float m = max(core, halo * 0.5);\n"
-		"    frag_color = vec4(u_color * m * u_alpha, m * u_alpha);\n"
+		"    vec4 c = vec4(u_color * m * u_alpha, m * u_alpha);\n"
+		"    frag_color  = c;\n"
+		"    frag_fbmask = vec4(c.rgb, gl_FragCoord.z);\n"
 		"}\n";
 	char err[512];
 	if (!GLShader_Build(&R_GlowShader, vs, fs, err, sizeof(err))) {
@@ -330,7 +332,8 @@ static qboolean R_EnsureSmokeShader (void)
 		"in float v_dist_fade;\n"
 		"uniform float u_age01;\n"
 		"uniform float u_seed;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"float hash21(vec2 p) {\n"
 		"    p = fract(p * vec2(123.34, 456.21));\n"
 		"    p += dot(p, p + 45.32);\n"
@@ -365,7 +368,8 @@ static qboolean R_EnsureSmokeShader (void)
 		"                      (1.0 - smoothstep(0.20, 0.95, u_age01));\n"
 		"    float alpha = mask * alpha_env * 0.30 * v_dist_fade;\n"
 		"    if (alpha < 0.01) discard;\n"
-		"    frag_color = vec4(vec3(grey), alpha);\n"
+		"    frag_color  = vec4(vec3(grey), alpha);\n"
+		"    frag_fbmask = vec4(0.0);\n"
 		"}\n";
 	char err[512];
 	if (!GLShader_Build(&R_SmokeShader, vs, fs, err, sizeof(err))) {

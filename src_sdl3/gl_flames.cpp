@@ -169,22 +169,20 @@ static qboolean R_EnsureEmbersShader (void)
 		"#version 330 core\n"
 		"in float v_life;\n"
 		"in float v_heat;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"void main() {\n"
-		"    // Round ember: distance from point center, falloff for soft edge.\n"
 		"    vec2 d = gl_PointCoord - vec2(0.5);\n"
 		"    float r2 = dot(d, d);\n"
 		"    if (r2 > 0.25) discard;\n"
 		"    float edge = 1.0 - smoothstep(0.15, 0.25, r2);\n"
-		"\n"
-		"    // Hot core (yellow) when young, deep red when old.\n"
 		"    vec3 hot  = vec3(1.00, 0.88, 0.35);\n"
 		"    vec3 cold = vec3(0.85, 0.20, 0.05);\n"
 		"    vec3 col  = mix(cold, hot, v_heat);\n"
-		"\n"
-		"    // Alpha: cubic fade over lifetime, scaled by edge mask.\n"
 		"    float alpha = edge * v_life * v_life;\n"
-		"    frag_color = vec4(col, alpha);\n"
+		"    frag_color  = vec4(col, alpha);\n"
+		"    // Emissive: RGB premultiplied, alpha = emitter depth.\n"
+		"    frag_fbmask = vec4(col * alpha, gl_FragCoord.z);\n"
 		"}\n";
 
 	char err[512];
@@ -292,7 +290,8 @@ static qboolean R_EnsureFlamesShader (void)
 		"in float v_life;\n"
 		"in float v_phase;\n"
 		"uniform float u_time;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"#define FLAMES_DEBUG_SOLID 0\n"
 		"\n"
 		"// Cheap 2D value noise in [0,1).\n"
@@ -385,6 +384,8 @@ static qboolean R_EnsureFlamesShader (void)
 		"                * life_alpha\n"
 		"                * 0.80;\n"
 		"    frag_color = vec4(color, alpha);\n"
+		"    // Emissive: RGB premultiplied, alpha = emitter depth.\n"
+		"    frag_fbmask = vec4(color * alpha, gl_FragCoord.z);\n"
 		"}\n";
 
 	char err[512];

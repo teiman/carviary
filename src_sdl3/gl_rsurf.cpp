@@ -512,9 +512,12 @@ void R_DrawBrushMTex (msurface_t *s)
 			glUniformMatrix4fv(R_WorldFullbrightShader_u_mvp, 1, GL_FALSE, mvp);
 			glUniform1i(R_WorldFullbrightShader_u_tex, 0);
 
+			// Route fullbright fragments into the glow mask too.
+			PostFX_BeginFullbrightMask();
 			DynamicVBO_Bind(&world_vbo);
 			Prof_CountDraw(n);
 			glDrawArrays(GL_TRIANGLES, 0, n);
+			PostFX_EndFullbrightMask();
 
 			glBlendFunc((GLenum)blend_src, (GLenum)blend_dst);
 			if (!blend_was_on) glDisable(GL_BLEND);
@@ -725,6 +728,121 @@ typedef struct {
 	texture_t *t;
 } water_draw_range_t;
 
+// Per-water-surface bitmask: which of the 4 AABB sides in tangent space are
+// exterior (touching wall/floor) vs interior (shared with another water
+// face). Bit order: 0=min_s (left), 1=max_s (right), 2=min_t (bottom),
+// 3=max_t (top). A cleared bit means "don't darken this side".
+//
+// Indexed by (surf - cl.worldmodel->surfaces). Built lazily from R_NewMap.
+static byte  *g_water_shore_mask = NULL;
+static int    g_water_shore_mask_count = 0;
+
+void Water_BuildShoreMasks (void)
+{
+	if (g_water_shore_mask) { free(g_water_shore_mask); g_water_shore_mask = NULL; }
+	g_water_shore_mask_count = 0;
+	if (!cl.worldmodel) return;
+
+	model_t *m = cl.worldmodel;
+	g_water_shore_mask_count = m->numsurfaces;
+	g_water_shore_mask = (byte *)calloc(g_water_shore_mask_count, 1);
+	// Default to all sides exterior. If we can't classify for some reason
+	// we still darken everything, which is the pre-fix behavior.
+	memset(g_water_shore_mask, 0x0F, g_water_shore_mask_count);
+
+	// Build edge reference counts among water faces only. Two faces sharing
+	// a BSP edge => that edge is interior to the water volume.
+	int nedges = m->numedges;
+	if (nedges <= 0) return;
+	byte *edge_water_count = (byte *)calloc(nedges, 1);
+
+	for (int i = 0; i < m->numsurfaces; ++i) {
+		msurface_t *s = &m->surfaces[i];
+		if (!(s->flags & SURF_DRAWTURB)) continue;
+		for (int e = 0; e < s->numedges; ++e) {
+			int se = m->surfedges[s->firstedge + e];
+			int ei = se < 0 ? -se : se;
+			if (ei > 0 && ei < nedges && edge_water_count[ei] < 255)
+				edge_water_count[ei]++;
+		}
+	}
+
+	// For each water face, classify each edge: if shared with another
+	// water face AND roughly aligned with one of the 4 AABB sides in
+	// tangent space, clear that side's bit in the mask.
+	for (int i = 0; i < m->numsurfaces; ++i) {
+		msurface_t *s = &m->surfaces[i];
+		if (!(s->flags & SURF_DRAWTURB)) continue;
+
+		mtexinfo_t *tex = s->texinfo;
+		// Face AABB in tangent space.
+		float tmin_s =  1e30f, tmax_s = -1e30f;
+		float tmin_t =  1e30f, tmax_t = -1e30f;
+		for (int e = 0; e < s->numedges; ++e) {
+			int se = m->surfedges[s->firstedge + e];
+			int ei = se < 0 ? -se : se;
+			medge_t *ed = &m->edges[ei];
+			for (int k = 0; k < 2; ++k) {
+				float *v = m->vertexes[ed->v[k]].position;
+				float tx = DotProduct(v, tex->vecs[0]) + tex->vecs[0][3];
+				float ty = DotProduct(v, tex->vecs[1]) + tex->vecs[1][3];
+				if (tx < tmin_s) tmin_s = tx; if (tx > tmax_s) tmax_s = tx;
+				if (ty < tmin_t) tmin_t = ty; if (ty > tmax_t) tmax_t = ty;
+			}
+		}
+		float range_s = tmax_s - tmin_s;
+		float range_t = tmax_t - tmin_t;
+		if (range_s < 1.0f) range_s = 1.0f;
+		if (range_t < 1.0f) range_t = 1.0f;
+		// Tolerance for "is edge aligned with a side": 5% of the AABB.
+		float tol_s = range_s * 0.05f;
+		float tol_t = range_t * 0.05f;
+
+		byte mask = 0x0F;   // start all-exterior, clear shared sides
+		for (int e = 0; e < s->numedges; ++e) {
+			int se = m->surfedges[s->firstedge + e];
+			int ei = se < 0 ? -se : se;
+			if (ei <= 0 || ei >= nedges) continue;
+			if (edge_water_count[ei] < 2) continue;   // not shared => exterior
+
+			// Get the edge's two endpoints in tangent space.
+			medge_t *ed = &m->edges[ei];
+			float *v0 = m->vertexes[ed->v[0]].position;
+			float *v1 = m->vertexes[ed->v[1]].position;
+			float tx0 = DotProduct(v0, tex->vecs[0]) + tex->vecs[0][3];
+			float ty0 = DotProduct(v0, tex->vecs[1]) + tex->vecs[1][3];
+			float tx1 = DotProduct(v1, tex->vecs[0]) + tex->vecs[0][3];
+			float ty1 = DotProduct(v1, tex->vecs[1]) + tex->vecs[1][3];
+
+			// Vertical edge (constant S) aligned with min_s or max_s?
+			if (fabsf(tx0 - tx1) < tol_s) {
+				float midx = 0.5f * (tx0 + tx1);
+				if (fabsf(midx - tmin_s) < tol_s) mask &= ~0x01;
+				if (fabsf(midx - tmax_s) < tol_s) mask &= ~0x02;
+			}
+			// Horizontal edge (constant T) aligned with min_t or max_t?
+			if (fabsf(ty0 - ty1) < tol_t) {
+				float midy = 0.5f * (ty0 + ty1);
+				if (fabsf(midy - tmin_t) < tol_t) mask &= ~0x04;
+				if (fabsf(midy - tmax_t) < tol_t) mask &= ~0x08;
+			}
+		}
+		g_water_shore_mask[i] = mask;
+	}
+
+	free(edge_water_count);
+}
+
+// Fetch the shore mask computed by Water_BuildShoreMasks. Returns 0x0F
+// (all sides exterior) as a safe default if not built yet.
+static byte Water_GetShoreMask (msurface_t *surf)
+{
+	if (!g_water_shore_mask) return 0x0F;
+	ptrdiff_t idx = surf - cl.worldmodel->surfaces;
+	if (idx < 0 || idx >= g_water_shore_mask_count) return 0x0F;
+	return g_water_shore_mask[idx];
+}
+
 void R_DrawWaterSurfaces (void)
 {
 	if (!waterchain) return;
@@ -740,50 +858,29 @@ void R_DrawWaterSurfaces (void)
 	Warp_EnsureVBO();
 
 	// ---- collect phase ----
-	// Walk waterchain, bucket surfaces by texture. Maps can have any number
-	// of liquid textures (water, lava, slime, teleporter, modded variants).
-	enum { MAX_WATER_TEXTURES = 32, MAX_PER_BUCKET = 4096 };
-	texture_t *bucket_tex[MAX_WATER_TEXTURES];
-	static msurface_t *bsurfs[MAX_WATER_TEXTURES][MAX_PER_BUCKET];
-	int bcount[MAX_WATER_TEXTURES];
-	int nbuckets = 0;
-	for (int i = 0; i < MAX_WATER_TEXTURES; ++i) bcount[i] = 0;
+	// One draw call per surface (needed for per-face shoreline uniforms).
+	// Surfaces are grouped only to minimize diffuse texture rebinds.
+	enum { MAX_WATER_SURFS = 4096 };
+	static msurface_t *surfs[MAX_WATER_SURFS];
+	static int         surf_first[MAX_WATER_SURFS];
+	static int         surf_count[MAX_WATER_SURFS];
+	int nsurfs = 0;
 
-	for (msurface_t *s = waterchain; s; s = s->texturechain)
-	{
-		texture_t *t = s->texinfo->texture;
-		int b;
-		for (b = 0; b < nbuckets; ++b) if (bucket_tex[b] == t) break;
-		if (b == nbuckets) {
-			if (nbuckets >= MAX_WATER_TEXTURES) continue;
-			bucket_tex[b] = t;
-			nbuckets++;
-		}
-		if (bcount[b] < MAX_PER_BUCKET)
-			bsurfs[b][bcount[b]++] = s;
+	for (msurface_t *s = waterchain; s; s = s->texturechain) {
+		if (nsurfs >= MAX_WATER_SURFS) break;
+		surfs[nsurfs++] = s;
 	}
 	waterchain = NULL;
 
-	// Triangulate every bucket into warp_soup back-to-back, recording ranges.
-	static water_draw_range_t ranges[MAX_WATER_TEXTURES];
-	int nranges = 0;
+	// ---- triangulate & record per-surface offsets ----
 	int nverts = 0;
-
-	for (int b = 0; b < nbuckets; ++b)
+	for (int i = 0; i < nsurfs; ++i)
 	{
-		int range_first = nverts;
-		for (int i = 0; i < bcount[b]; ++i)
-		{
-			if (nverts >= WARP_MAX_VERTS - 30) break;
-			Water_AppendSurface(bsurfs[b][i], warp_soup, &nverts, WARP_MAX_VERTS);
-		}
-		int range_count = nverts - range_first;
-		if (range_count > 0) {
-			ranges[nranges].first = range_first;
-			ranges[nranges].count = range_count;
-			ranges[nranges].t     = bucket_tex[b];
-			nranges++;
-		}
+		if (nverts >= WARP_MAX_VERTS - 30) { nsurfs = i; break; }
+		int before = nverts;
+		Water_AppendSurface(surfs[i], warp_soup, &nverts, WARP_MAX_VERTS);
+		surf_first[i] = before;
+		surf_count[i] = nverts - before;
 	}
 
 	if (nverts == 0) return;
@@ -810,13 +907,55 @@ void R_DrawWaterSurfaces (void)
 	glUniform1i       (R_WorldWaterShader_u_tex, 0);
 	glUniform1f       (R_WorldWaterShader_u_time, (float)realtime);
 	glUniform1f       (R_WorldWaterShader_u_alpha, alpha);
+	extern cvar_t r_water_fx;
+	qboolean water_fx_on = (r_water_fx.value != 0.0f);
+	glUniform1f       (R_WorldWaterShader_u_shore_width,    48.0f);
+	glUniform1f       (R_WorldWaterShader_u_shore_strength, water_fx_on ? 0.6f  : 0.0f);
+	glUniform1f       (R_WorldWaterShader_u_cloud_scale,    200.0f);
+	glUniform1f       (R_WorldWaterShader_u_cloud_amp,      water_fx_on ? 0.8f  : 0.0f);
+	glUniform1f       (R_WorldWaterShader_u_cloud_speed,    1.33f);
 
 	glActiveTexture(GL_TEXTURE0);
-	for (int i = 0; i < nranges; ++i)
+	texture_t *last_tex = NULL;
+	for (int i = 0; i < nsurfs; ++i)
 	{
-		glBindTexture(GL_TEXTURE_2D, ranges[i].t->gl_texturenum);
-		Prof_CountDraw(ranges[i].count);
-		glDrawArrays(GL_TRIANGLES, vertex_offset + ranges[i].first, ranges[i].count);
+		if (surf_count[i] == 0) continue;
+		msurface_t *s = surfs[i];
+
+		// Rebind diffuse only on change.
+		texture_t *t = s->texinfo->texture;
+		if (t != last_tex) {
+			glBindTexture(GL_TEXTURE_2D, t->gl_texturenum);
+			last_tex = t;
+		}
+
+		// Face AABB in tangent (texinfo) space.
+		mtexinfo_t *tex = s->texinfo;
+		float tmin_s =  1e30f, tmax_s = -1e30f;
+		float tmin_t =  1e30f, tmax_t = -1e30f;
+		for (glpoly_t *p = s->polys; p; p = p->next) {
+			float *v = p->verts[0];
+			for (int k = 0; k < p->numverts; ++k, v += VERTEXSIZE) {
+				float tx = DotProduct(v, tex->vecs[0]) + tex->vecs[0][3];
+				float ty = DotProduct(v, tex->vecs[1]) + tex->vecs[1][3];
+				if (tx < tmin_s) tmin_s = tx; if (tx > tmax_s) tmax_s = tx;
+				if (ty < tmin_t) tmin_t = ty; if (ty > tmax_t) tmax_t = ty;
+			}
+		}
+
+		byte mask = Water_GetShoreMask(s);
+		float ext_min_s = (mask & 0x01) ? 1.0f : 0.0f;
+		float ext_max_s = (mask & 0x02) ? 1.0f : 0.0f;
+		float ext_min_t = (mask & 0x04) ? 1.0f : 0.0f;
+		float ext_max_t = (mask & 0x08) ? 1.0f : 0.0f;
+
+		glUniform2f(R_WorldWaterShader_u_tc_min, tmin_s, tmin_t);
+		glUniform2f(R_WorldWaterShader_u_tc_max, tmax_s, tmax_t);
+		glUniform4f(R_WorldWaterShader_u_shore_ext,
+		            ext_min_s, ext_max_s, ext_min_t, ext_max_t);
+
+		Prof_CountDraw(surf_count[i]);
+		glDrawArrays(GL_TRIANGLES, vertex_offset + surf_first[i], surf_count[i]);
 	}
 
 	if (!blend_was_on && alpha < 1.0f) glDisable(GL_BLEND);
@@ -1467,6 +1606,7 @@ static void R_EmitTextureChains (model_t *texmodel)
 		glUniformMatrix4fv(R_WorldFullbrightShader_u_mvp, 1, GL_FALSE, mvp);
 		glUniform1i(R_WorldFullbrightShader_u_tex, 0);
 
+		PostFX_BeginFullbrightMask();
 		int draw_cursor = 0;
 		for (int b = 0; b < fb_batch_count; ++b)
 		{
@@ -1480,6 +1620,7 @@ static void R_EmitTextureChains (model_t *texmodel)
 			glMultiDrawArrays(GL_TRIANGLES, fb_firsts + draw_cursor, fb_counts + draw_cursor, n);
 			draw_cursor += n;
 		}
+		PostFX_EndFullbrightMask();
 
 		glBlendFunc((GLenum)blend_src, (GLenum)blend_dst);
 		if (!blend_was_on) glDisable(GL_BLEND);

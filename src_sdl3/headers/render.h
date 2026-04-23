@@ -176,6 +176,14 @@ void R_RocketTrail (vec3_t start, vec3_t end, entity_t *ent);
 void R_BloodTrail (vec3_t start, vec3_t end, entity_t *ent);
 void R_TracerTrail (vec3_t start, vec3_t end, entity_t *ent, byte color);
 void R_VoorTrail (vec3_t start, vec3_t end, entity_t *ent);
+
+// True trails: solid billboarded ribbons (gl_true_trails.cpp).
+void R_TrueTrail_Init    (void);
+void R_TrueTrail_Clear   (void);
+void R_TrueTrail_Draw    (void);
+void R_TrueTrail_Spike   (vec3_t start, vec3_t end, entity_t *ent);
+void R_TrueTrail_WizSpike(vec3_t start, vec3_t end, entity_t *ent);
+void R_TrueTrail_Missile (vec3_t start, vec3_t end, entity_t *ent);
 void R_Snow (vec3_t min, vec3_t max, int flakes);
 void R_SparkShower (vec3_t origin, vec3_t direction);
 void R_Rain (vec3_t min, vec3_t max, int drops);

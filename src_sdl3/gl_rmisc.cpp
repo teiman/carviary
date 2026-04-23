@@ -91,6 +91,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_norefresh);
 	Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_wateralpha);
+	extern cvar_t r_water_fx;
+	Cvar_RegisterVariable (&r_water_fx);
 	Cvar_RegisterVariable (&r_dynamic);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_speeds);
@@ -117,6 +119,7 @@ void R_Init (void)
 
 
 	R_InitParticles (); // initiate particle engine
+	R_TrueTrail_Init ();
 
 	glGenTextures(16, playertextures);
 
@@ -140,6 +143,27 @@ void R_Init (void)
 	// Gunshot wall decals (first iteration: debug markers only).
 	extern void Gunshot_Init(void);
 	Gunshot_Init();
+
+	// Offscreen scene FBO for post-processing.
+	PostFX_Init();
+
+	// Custom explosion effect (replaces invisible stock particles).
+	Explosion_Init();
+
+	// Blood splatter (intercepts stock particle calls with blood colors).
+	Blood_Init();
+
+	{
+		extern cvar_t r_sky_sun, r_sky_sun_strength, r_sky_sun_tight;
+		extern cvar_t r_sky_sun_r, r_sky_sun_g, r_sky_sun_b, r_sky_sun_bloom;
+		Cvar_RegisterVariable(&r_sky_sun);
+		Cvar_RegisterVariable(&r_sky_sun_strength);
+		Cvar_RegisterVariable(&r_sky_sun_tight);
+		Cvar_RegisterVariable(&r_sky_sun_r);
+		Cvar_RegisterVariable(&r_sky_sun_g);
+		Cvar_RegisterVariable(&r_sky_sun_b);
+		Cvar_RegisterVariable(&r_sky_sun_bloom);
+	}
 
 	Prof_Init ();
 }
@@ -269,6 +293,7 @@ void R_NewMap (void)
 
 	r_viewleaf = NULL;
 	R_ClearParticles ();
+	R_TrueTrail_Clear ();
 
 	r_dlightframecount = 0;
 
@@ -278,6 +303,11 @@ void R_NewMap (void)
 	// assigns lightmap coords (s->light_s/t) into each surface's poly verts,
 	// which we copy into the static VBO.
 	R_OnNewMap_BuildWorldVBO();
+
+	// Classify edges of water faces (interior vs exterior) so the shoreline
+	// shader doesn't darken where two water faces touch each other.
+	extern void Water_BuildShoreMasks (void);
+	Water_BuildShoreMasks();
 
 	// Auto-grass: mark configured textures so they get the grass shader
 	// without needing a manual grow_grass command.

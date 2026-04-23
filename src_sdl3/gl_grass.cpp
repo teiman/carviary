@@ -86,14 +86,15 @@ qboolean R_EnsureWorldGrassShader (void)
 		"uniform sampler2D u_tex;\n"
 		"uniform sampler2D u_lightmap;\n"
 		"uniform float u_alpha;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"void main() {\n"
 		"    vec4 diffuse = texture(u_tex, v_tc);\n"
 		"    vec4 lm = texture(u_lightmap, v_lmtc);\n"
 		"    vec3 rgb = diffuse.rgb * lm.rgb;\n"
-		"    // Tint toward grass green. Iteration 1: simple bias, no blades yet.\n"
 		"    rgb = mix(rgb, rgb * vec3(0.55, 1.15, 0.55), 0.7);\n"
 		"    frag_color = vec4(rgb, diffuse.a * u_alpha);\n"
+		"    frag_fbmask = vec4(0.0);\n"
 		"}\n";
 
 	char err[512];
@@ -402,16 +403,15 @@ static qboolean R_EnsureGrassBladesShader (void)
 		"in vec2  v_lmtc;\n"
 		"in float v_density;\n"
 		"uniform sampler2D u_lightmap;\n"
-		"out vec4 frag_color;\n"
+		"layout(location = 0) out vec4 frag_color;\n"
+		"layout(location = 1) out vec4 frag_fbmask;\n"
 		"void main() {\n"
-		"    // Base greens. Original palette x 0.8 x 0.85 x 0.80 ~ 0.544 of source.\n"
 		"    vec3 rgb = mix(vec3(0.04352, 0.08160, 0.02720),\n"
 		"                   vec3(0.11968, 0.18496, 0.06528), v_t);\n"
-		"    // Sparse areas read as slightly darker grass (drier / shaded).\n"
-		"    // density 1 -> 1.0, density 0 -> 0.80 (another 20% on top).\n"
 		"    float shade = mix(0.80, 1.0, v_density);\n"
 		"    vec3 lm = texture(u_lightmap, v_lmtc).rgb;\n"
 		"    frag_color = vec4(rgb * lm * shade, 1.0);\n"
+		"    frag_fbmask = vec4(0.0);\n"
 		"}\n";
 
 	char err[512];

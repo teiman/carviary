@@ -91,6 +91,11 @@ static qboolean R_EnsureMagicShader (void)
 		"// dual-source blending.\n"
 		"layout(location = 0, index = 0) out vec4 frag_color;\n"   // SRC0
 		"layout(location = 0, index = 1) out vec4 frag_factor;\n"  // SRC1
+		"// NOTE: no location=1 here. NVIDIA rejects mixing dual-source\n"
+		"// (two outputs at location 0 with distinct index) and a second\n"
+		"// MRT attachment at location 1. The magic aura therefore does\n"
+		"// not feed the bloom mask; its dual-source composite is the\n"
+		"// intended effect by itself.\n"
 		"\n"
 		"float hash21(vec2 p) {\n"
 		"    p = fract(p * vec2(123.34, 456.21));\n"
@@ -260,7 +265,9 @@ void Magic_DrawForEntity (entity_t *e)
 	glDepthMask(GL_FALSE);
 
 	glBindVertexArray(magic_vao);
+	PostFX_BeginNoMaskWrite();
 	glDrawArrays(GL_TRIANGLES, 0, 6);
+	PostFX_EndNoMaskWrite();
 
 	// Restore.
 	glDepthMask(dmask_was);

@@ -78,6 +78,7 @@ cvar_t	r_norefresh			= {"r_norefresh","0"};
 cvar_t	r_drawviewmodel		= {"r_drawviewmodel","1"};
 cvar_t	r_speeds			= {"r_speeds","0"};
 cvar_t	r_wateralpha		= {"r_wateralpha","1", true};
+cvar_t	r_water_fx			= {"r_water_fx","1", true};   // shoreline + cloud noise
 cvar_t	r_dynamic			= {"r_dynamic","1"};
 cvar_t	r_novis				= {"r_novis","0"};
 cvar_t	gl_finish			= {"gl_finish","0", true};
@@ -376,7 +377,13 @@ void R_DrawAliasModel (entity_t *e, int cull)
 	if (paliashdr->fb_texturenum[currententity->skinnum][anim] && gl_fbr.value)
 	{
 		glBindTexture (GL_TEXTURE_2D, paliashdr->fb_texturenum[currententity->skinnum][anim]);
+		// Flag this pass as fullbright so the alias fragment shader routes
+		// its output into the fb_mask attachment for the bloom post-fx.
+		glUniform1i(R_AliasShader_u_fullbright, 1);
+		PostFX_BeginFullbrightMask();
 		GL_DrawAliasBlendedFrame (currententity->frame, paliashdr, currententity);
+		PostFX_EndFullbrightMask();
+		glUniform1i(R_AliasShader_u_fullbright, currententity->model->fullbright ? 1 : 0);
 	}
 
 	MatStack_Pop(&r_modelview);
@@ -921,6 +928,9 @@ void R_RenderScene (void)
 	// R_SortTransEntities, including the alpha=1 ones) are already on
 	// screen with correct depth -- the smoke just composites on top.
 	{ extern void Gunshot_Draw(void); Gunshot_Draw(); }
+	Explosion_Draw();
+	Blood_Draw();
+	R_TrueTrail_Draw();
 
 	if (r_speeds.value)
 	{
@@ -943,6 +953,11 @@ void R_RenderView (void)
 		Host_Error ("R_RenderView: NULL worldmodel");
 	}
 
+	// Route the 3D scene through the offscreen scene FBO so any post-
+	// process (e.g. fullbright glow) can read the rendered image. HUD
+	// and console are drawn to the default framebuffer AFTER this.
+	PostFX_BeginScene();
+
 	R_Clear ();
 	R_RenderScene();
 
@@ -953,4 +968,12 @@ void R_RenderView (void)
 	Prof_BeginSection (PROF_POLYBLEND);
 	R_PolyBlend ();
 	Prof_EndSection (PROF_POLYBLEND);
+
+	// Sun / moon overlay: drawn over everything the scene produced.
+	// A ray test inside Sky_DrawSun decides whether it is actually
+	// visible (sky present in the sun direction).
+	extern void Sky_DrawSun(void);
+	Sky_DrawSun();
+
+	PostFX_EndScene();
 }

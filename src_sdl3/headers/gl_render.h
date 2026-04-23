@@ -126,11 +126,59 @@ void Flames_Init(void);
 void Flames_Draw(void);  // call after R_DrawWaterSurfaces
 
 // ---------------------------------------------------------------------------
+// Scene FBO + post-processing pipeline. The 3D scene is rendered into an
+// offscreen color texture (scene FBO); PostFX_EndScene blits it to the
+// default framebuffer. Future post-processes (fullbright glow, etc.) hook
+// into this path.
+// ---------------------------------------------------------------------------
+void PostFX_Init(void);
+void PostFX_BeginScene(void);   // bind scene FBO; call before R_Clear
+void PostFX_EndScene(void);     // blit scene FBO to default FB; call after 3D is done
+void PostFX_Shutdown(void);
+
+// Bracket a fullbright draw so its fragments also write to the fb_mask
+// attachment. Fragment shader MUST declare:
+//   layout(location = 0) out vec4 frag_color;
+//   layout(location = 1) out vec4 frag_fbmask;
+// and emit the glow contribution into frag_fbmask (usually just the
+// fullbright color itself, or a scalar * fullbright color).
+void PostFX_BeginFullbrightMask(void);
+void PostFX_EndFullbrightMask(void);
+
+// Use around draws whose shader cannot declare a location=1 output
+// (e.g. dual-source blend shaders). fb_mask attachment is disabled so
+// the magic pass leaves existing bloom tags intact.
+void PostFX_BeginNoMaskWrite(void);
+void PostFX_EndNoMaskWrite(void);
+
+// Scene depth texture -- available whenever the scene FBO is bound.
+// Used by sky-sun and similar effects that need occlusion info.
+GLuint PostFX_GetDepthTex(void);
+GLuint PostFX_GetDepthSnapshotTex(void);
+void   PostFX_SnapshotDepth(void);
+
+// ---------------------------------------------------------------------------
 // Dark-magic aura over alias monsters (not the view model). Uses dual-source
 // blending so a single pass both darkens (cloud edges) and brightens (core).
 // ---------------------------------------------------------------------------
 void Magic_Init(void);
 void Magic_DrawForEntity(entity_t *e);  // call after R_DrawAliasModel(e)
+
+// ---------------------------------------------------------------------------
+// Explosion: bright puffs + cooling trails + sparks.
+// ---------------------------------------------------------------------------
+void Explosion_Init(void);
+void Explosion_Spawn(const vec3_t origin, int tint);  // 0 = rocket, 1 = tarbaby
+void Explosion_Draw(void);
+
+// ---------------------------------------------------------------------------
+// Blood splatter system. Intercepts stock per-pixel particle calls when the
+// palette color index falls in the "blood" range and spawns proper droplet
+// jets that fall with gravity and bounce once on impact.
+// ---------------------------------------------------------------------------
+void     Blood_Init(void);
+void     Blood_Draw(void);
+qboolean Blood_InterceptParticleEffect(vec3_t origin, vec3_t direction, int color, int count);
 
 // ---------------------------------------------------------------------------
 // Shared shader: `world_fullbright`
@@ -154,6 +202,14 @@ extern GLint    R_WorldWaterShader_u_mvp;
 extern GLint    R_WorldWaterShader_u_tex;
 extern GLint    R_WorldWaterShader_u_time;
 extern GLint    R_WorldWaterShader_u_alpha;
+extern GLint    R_WorldWaterShader_u_tc_min;
+extern GLint    R_WorldWaterShader_u_tc_max;
+extern GLint    R_WorldWaterShader_u_shore_ext;
+extern GLint    R_WorldWaterShader_u_shore_width;
+extern GLint    R_WorldWaterShader_u_shore_strength;
+extern GLint    R_WorldWaterShader_u_cloud_scale;
+extern GLint    R_WorldWaterShader_u_cloud_amp;
+extern GLint    R_WorldWaterShader_u_cloud_speed;
 
 // Lazy initialization. Idempotent. Returns true if the shader is usable.
 qboolean R_EnsureParticleShader(void);

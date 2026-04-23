@@ -638,14 +638,14 @@ void CL_RelinkEntities (void)
 
 			if (ent->model->flags & EF_ROCKET)
 			{
-				R_RocketTrail (oldorg, ent->origin, ent);
+				R_TrueTrail_Missile (oldorg, ent->origin, ent);
 				dl = CL_AllocDlight (i);
 				VectorCopy (ent->origin, dl->origin);
 				dl->radius = 250;
 				dl->die = cl.time + 0.01;
 			}
 			else if (ent->model->flags & EF_GRENADE)
-				R_RocketTrail (oldorg, ent->origin, ent);
+				R_TrueTrail_Missile (oldorg, ent->origin, ent);
 			
 			else if (ent->model->flags & EF_GIB)
 				R_BloodTrail (oldorg, ent->origin, ent);
@@ -689,7 +689,24 @@ void CL_RelinkEntities (void)
 				dl->color[2] = 0.62f;
 			}
 		}
-		
+
+		// True-trail for spikes / wizard spikes. Stock Quake has no EF_* flag
+		// for these, so they're identified by model name. Must run outside
+		// the `ent->model->flags` branch above because the spike models
+		// carry no effect flags.
+		if (ent->model->name[0] == 'p')
+		{
+			if (!strcmp(ent->model->name, "progs/spike.mdl") ||
+			    !strcmp(ent->model->name, "progs/s_spike.mdl"))
+			{
+				R_TrueTrail_Spike (oldorg, ent->origin, ent);
+			}
+			else if (!strcmp(ent->model->name, "progs/w_spike.mdl"))
+			{
+				R_TrueTrail_WizSpike (oldorg, ent->origin, ent);
+			}
+		}
+
 		// Tomaz - QC Glow Begin
 		if (ent->glow_size)
 		{

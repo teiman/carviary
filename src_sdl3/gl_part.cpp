@@ -847,6 +847,14 @@ void R_RunParticleEffect (vec3_t origin, vec3_t direction, int color, int count)
 	particle_t	*p;
 	byte		*color24;
 
+	// Blood colors are redirected to the new droplet system; bail out of
+	// the stock (near-invisible) particle path so we don't double-draw.
+	{
+		extern qboolean Blood_InterceptParticleEffect(vec3_t, vec3_t, int, int);
+		if (Blood_InterceptParticleEffect(origin, direction, color, count))
+			return;
+	}
+
 	if (count == 128)
 	{
 		int expcount = (int)(count * 1.6); // AD-style: denser explosions
@@ -957,42 +965,10 @@ void R_SparkShower (vec3_t origin, vec3_t direction)
 	int			i, contents;
 	particle_t	*p;
 
-	p	= addParticle();
-	if (!free_particles)
-	{
-		return;
-	}
-
-	contents			= Mod_PointInLeaf(p->origin, cl.worldmodel)->contents;
-
-	if ((contents		== CONTENTS_EMPTY) ||
-		(contents		== CONTENTS_SOLID))
-	{
-		p->scale			= 2;
-		p->alpha			= 200;
-		p->texnum			= smoke1_tex + (rand() & 3);
-		p->bounce			= 0;
-		p->type				= pt_bulletpuff;
-		p->glow				= false;
-
-		p->colorred			= 187;
-		p->colorgreen		= 187;
-		p->colorblue		= 187;
-
-		p->fade				= -255;
-		p->growth			= 16;
-		p->gravity			= 0;
-
-		p->die				= cl.time + 5;
-
-		p->origin[0]		= origin[0];
-		p->origin[1]		= origin[1];
-		p->origin[2]		= origin[2];
-
-		p->velocity[0]		= (rand() & 7) - 4;
-		p->velocity[1]		= (rand() & 7) - 4;
-		p->velocity[2]		= (rand() & 7) - 4;
-	}
+	// Legacy grey bulletpuff removed: it spawned a scale-2 smoke sprite with
+	// growth=16 and die=cl.time+5 at every TE_GUNSHOT/TE_SPIKE impact, which
+	// covered up the much nicer gunshot decal with a big grey blob for 5
+	// seconds. Keep only the yellow ricochet sparks below.
 
 	for (i=0 ; i<10 ; i++)
 	{
@@ -1904,4 +1880,55 @@ void R_DrawParticles (qboolean inwater)
 	glUseProgram(0);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDepthMask(GL_TRUE);
+}
+
+// Public helper used by gl_true_trails.cpp: underwater bubble particle.
+// Keeps the particle_s struct private to this file.
+void R_SpawnBubbleParticle (const vec3_t pos, float scale)
+{
+	particle_t *p = addParticle();
+	if (!p) return;
+	p->origin[0] = pos[0] + ((rand() & 3) - 1);
+	p->origin[1] = pos[1] + ((rand() & 3) - 1);
+	p->origin[2] = pos[2] + ((rand() & 3) - 1);
+	p->die        = cl.time + 2.0f + (rand() & 7) * 0.1f;
+	p->colorred   = 200;
+	p->colorgreen = 220;
+	p->colorblue  = 255;
+	p->alpha      = 200;
+	p->scale      = scale;
+	p->texnum     = bubble_tex;
+	p->type       = pt_bubble;
+	p->bounce     = 0;
+	p->fade       = 0;
+	p->growth     = 0;
+	p->gravity    = 0;
+	p->velocity[0] = (rand() & 3) - 1;
+	p->velocity[1] = (rand() & 3) - 1;
+	p->velocity[2] = 18 + (rand() & 7);
+	p->glow        = false;
+}
+
+// Public helper used by gl_true_trails.cpp: rocket ember/spark.
+// Bright orange glowing point with initial velocity + gravity + quick fade.
+void R_SpawnEmberParticle (const vec3_t pos, const vec3_t vel, float scale, float life)
+{
+	particle_t *p = addParticle();
+	if (!p) return;
+	VectorCopy(pos, p->origin);
+	p->die        = cl.time + life;
+	// Hot orange at birth; pt_fade will interpolate toward black via `fade`.
+	p->colorred   = 255;
+	p->colorgreen = 160 + (rand() & 31);
+	p->colorblue  = 40  + (rand() & 31);
+	p->alpha      = 220;
+	p->scale      = scale;
+	p->texnum     = particle_tex;
+	p->type       = pt_fade;
+	p->bounce     = 0;
+	p->fade       = -180;       // alpha decay per second
+	p->growth     = -1.0f;      // shrink as they cool
+	p->gravity    = 0;   // hot embers rise on convection; gravity negligible
+	VectorCopy(vel, p->velocity);
+	p->glow       = true;       // renders with additive-ish pop
 }
