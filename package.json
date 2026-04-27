@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Carviary - Quake engine based on TomazQuake",
   "scripts": {
-    "compile": "cmake -S src_cpp -B build && cmake --build build --config Release && echo Build complete: carviary.exe",
+    "compile": "cmake -S src_sdl3 -B build_sdl3 -A Win32 -DCMAKE_PREFIX_PATH=SDL3-3.2.14 && cmake --build build_sdl3 --config Release && echo Build complete: carviary_sdl3.exe",
+    "compile:legacy": "cmake -S src_cpp -B build && cmake --build build --config Release && echo Build complete: carviary.exe",
     "start": "cd d:\\quake && carviary_sdl3.exe",
     "compile:sdl3": "cmake -S src_sdl3 -B build_sdl3 -A Win32 -DCMAKE_PREFIX_PATH=SDL3-3.2.14 && cmake --build build_sdl3 --config Release && echo Build complete: carviary_sdl3.exe",
     "start:sdl3": "cd d:\\quake && carviary_sdl3.exe",

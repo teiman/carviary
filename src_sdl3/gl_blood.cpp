@@ -195,6 +195,47 @@ static void Blood_RandomDirInCone (const vec3_t axis, float spread, vec3_t out)
 // Main entry: spawn a blood burst at `origin` biased toward `direction`.
 // Each burst rolls a set of random parameters (jet count, cone spread,
 // per-jet speed and drop count) so consecutive bursts look different.
+extern void  Burn_StampColored (const vec3_t pos, float radius, float intensity,
+                               int r, int g, int b);
+// Low-level: darken + optional color tint in one stamp.
+extern void  Burn_StampCoreEx (const vec3_t pos, float radius,
+                              int darken_peak,
+                              int add_r_peak, int add_g_peak, int add_b_peak);
+
+// Up to two short traces from `origin` roughly along `axis`. Any that hits
+// geometry within a modest distance stamps a small bright-red stain on the
+// lightmap.
+static void Blood_StampNearbyStains (const vec3_t origin, const vec3_t axis)
+{
+	if (!cl.worldmodel) return;
+	int count = 1 + (rand() & 1);   // 1 or 2 stains per burst
+	for (int i = 0; i < count; ++i) {
+		vec3_t dir;
+		Blood_RandomDirInCone(axis, 0.45f, dir);   // wider than the jets
+		const float dist = 90.0f + (rand() & 31);
+		vec3_t end = {
+			origin[0] + dir[0] * dist,
+			origin[1] + dir[1] * dist,
+			origin[2] + dir[2] * dist,
+		};
+		vec3_t impact, normal;
+		vec3_t start_nc = { origin[0], origin[1], origin[2] };
+		float frac = TraceLine(start_nc, end, impact, normal);
+		if (frac >= 1.0f) continue;   // hit nothing
+		// Pull slightly away from the wall so the stamp lands on the face.
+		vec3_t p = {
+			impact[0] - dir[0] * 0.5f,
+			impact[1] - dir[1] * 0.5f,
+			impact[2] - dir[2] * 0.5f,
+		};
+		// Dark red stain: darken the lumel AND add a modest red tint so the
+		// mark reads as wet blood soaked into the surface rather than a
+		// glowing decal. Darkening peaks at 60%, red adds just 50 peak.
+		float radius = 12.0f + (rand() & 7);
+		Burn_StampCoreEx(p, radius, /*darken*/150, /*r*/50, /*g*/0, /*b*/0);
+	}
+}
+
 static void Blood_SpawnBurst (const vec3_t origin, const vec3_t direction, int count)
 {
 	vec3_t axis;
@@ -244,6 +285,9 @@ static void Blood_SpawnBurst (const vec3_t origin, const vec3_t direction, int c
 			total_drops++;
 		}
 	}
+
+	// Leave a few small red stains on nearby walls (lightmap stamps).
+	Blood_StampNearbyStains(origin, axis);
 
 	if (r_blood_debug.value) {
 		Con_Printf("blood: origin(%.1f %.1f %.1f) dir(%.2f %.2f %.2f) count=%d -> %d jets (cone=%.2f spd_k=%.2f) %d drops\n",

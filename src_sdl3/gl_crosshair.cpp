@@ -255,8 +255,9 @@ void Draw_Crosshair (int num)
 	//
 	// Crosshair offset
 	//
-	x = (vid.width /2) - 16; // was 14
-	y = (vid.height/2) - 8;  // was 14
+	extern float cl_crosshair_screen_dx, cl_crosshair_screen_dy;
+	x = (int)((vid.width /2) - 16 + cl_crosshair_screen_dx); // was 14
+	y = (int)((vid.height/2) - 8  + cl_crosshair_screen_dy); // was 14
 
 	Crosshair_EnsureVBO();
 	if (!crosshair_vbo_ready)

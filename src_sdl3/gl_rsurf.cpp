@@ -88,6 +88,179 @@ qboolean	lightmap_modified[MAX_LIGHTMAPS];
 glRect_t	lightmap_rectchange[MAX_LIGHTMAPS];
 byte		lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
 
+// Burn overlay: 4 bytes per lumel (darken, add_r, add_g, add_b).
+//   darken: subtract from lumel brightness (0..255). Explosions write here.
+//   add_rgb: added to the final color (0..255). Lightning blasts write here
+//           to leave a bright blue glow on the wall.
+// Same page/row layout as `lightmaps[]`. R_BuildLightMap applies both during
+// the store step.
+#define BURN_STRIDE 4
+static byte burn_atlas[BURN_STRIDE*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
+
+void R_BuildLightMap (msurface_t *surf, byte *dest, int stride);
+
+void R_ClearBurnMarks (void)
+{
+	memset(burn_atlas, 0, sizeof(burn_atlas));
+}
+
+// Expand the dirty-rect of a lightmap page to cover a newly written
+// sub-rectangle. Follows the same math as R_RenderDynamicLightmaps so
+// the uploaded region stays correct.
+static void Burn_DirtyPage (int page, int s0, int t0, int smax, int tmax)
+{
+	lightmap_modified[page] = true;
+	glRect_t *rect = &lightmap_rectchange[page];
+	if (t0 < rect->t) {
+		if (rect->h) rect->h += rect->t - t0;
+		rect->t = t0;
+	}
+	if (s0 < rect->l) {
+		if (rect->w) rect->w += rect->l - s0;
+		rect->l = s0;
+	}
+	if (rect->w + rect->l < s0 + smax)
+		rect->w = (s0 + smax) - rect->l;
+	if (rect->h + rect->t < t0 + tmax)
+		rect->h = (t0 + tmax) - rect->t;
+}
+
+// Core stamp: writes both a darken amount and an additive color tint to the
+// burn atlas and re-runs R_BuildLightMap for affected faces. `darken` and
+// `add_rgb` are in 0..255 peak values at the stamp center; falloff is
+// quadratic to 0 at the edge. Pass 0 to either to skip it.
+void Burn_StampCoreEx (const vec3_t pos, float radius,
+                       int darken_peak,
+                       int add_r_peak, int add_g_peak, int add_b_peak)
+{
+	float intensity = 1.0f;   // legacy arg retained for callers below
+	(void)intensity;
+	if (darken_peak <= 0 && add_r_peak <= 0 && add_g_peak <= 0 && add_b_peak <= 0) return;
+	if (radius <= 0.0f || !cl.worldmodel) return;
+
+	model_t *m = cl.worldmodel;
+	float r2 = radius * radius;
+
+	for (int si = 0; si < m->numsurfaces; ++si) {
+		msurface_t *s = &m->surfaces[si];
+		if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)) continue;
+		if (!s->plane) continue;
+
+		mplane_t *pl = s->plane;
+		float d = pl->normal[0]*pos[0] + pl->normal[1]*pos[1] + pl->normal[2]*pos[2] - pl->dist;
+		if (s->flags & SURF_PLANEBACK) d = -d;
+		if (d < -radius || d > radius) continue;
+
+		float n_signed = (s->flags & SURF_PLANEBACK) ? -d : d;
+		vec3_t proj = {
+			pos[0] - pl->normal[0] * n_signed,
+			pos[1] - pl->normal[1] * n_signed,
+			pos[2] - pl->normal[2] * n_signed,
+		};
+
+		mtexinfo_t *tex = s->texinfo;
+		float ds = DotProduct(proj, tex->vecs[0]) + tex->vecs[0][3] - s->texturemins[0];
+		float dt = DotProduct(proj, tex->vecs[1]) + tex->vecs[1][3] - s->texturemins[1];
+		float ext_s = (float)s->extents[0];
+		float ext_t = (float)s->extents[1];
+		if (ds < -radius || ds > ext_s + radius) continue;
+		if (dt < -radius || dt > ext_t + radius) continue;
+
+		int smax = (s->extents[0] >> 4) + 1;
+		int tmax = (s->extents[1] >> 4) + 1;
+		float center_s = ds / 16.0f;
+		float center_t = dt / 16.0f;
+		float effective_r2 = r2 - d*d;
+		if (effective_r2 <= 0.0f) continue;
+		float eff_lr = sqrtf(effective_r2) / 16.0f;
+
+		int lmin_s = (int)floorf(center_s - eff_lr);
+		int lmax_s = (int)ceilf (center_s + eff_lr);
+		int lmin_t = (int)floorf(center_t - eff_lr);
+		int lmax_t = (int)ceilf (center_t + eff_lr);
+		if (lmin_s < 0) lmin_s = 0;
+		if (lmin_t < 0) lmin_t = 0;
+		if (lmax_s > smax - 1) lmax_s = smax - 1;
+		if (lmax_t > tmax - 1) lmax_t = tmax - 1;
+		if (lmin_s > lmax_s || lmin_t > lmax_t) continue;
+
+		int page = s->lightmaptexturenum;
+		int page_base = page * BLOCK_WIDTH * BLOCK_HEIGHT * BURN_STRIDE;
+		qboolean touched = false;
+		float inv_r = 1.0f / eff_lr;
+
+		for (int lt = lmin_t; lt <= lmax_t; ++lt) {
+			for (int ls = lmin_s; ls <= lmax_s; ++ls) {
+				float du = (float)ls - center_s;
+				float dv = (float)lt - center_t;
+				float r_norm = sqrtf(du*du + dv*dv) * inv_r;
+				if (r_norm >= 1.0f) continue;
+				float k = 1.0f - r_norm;
+				k = k * k;   // quadratic falloff
+
+				int off = page_base +
+				          ((s->light_t + lt) * BLOCK_WIDTH + (s->light_s + ls)) * BURN_STRIDE;
+				byte *bb = &burn_atlas[off];
+
+				if (darken_peak > 0) {
+					int add = (int)(darken_peak * k);
+					int nv = bb[0] + add;
+					if (nv > 255) nv = 255;
+					if (nv > bb[0]) { bb[0] = (byte)nv; touched = true; }
+				}
+				if (add_r_peak > 0) {
+					int add = (int)(add_r_peak * k);
+					int nv = bb[1] + add;
+					if (nv > 255) nv = 255;
+					if (nv > bb[1]) { bb[1] = (byte)nv; touched = true; }
+				}
+				if (add_g_peak > 0) {
+					int add = (int)(add_g_peak * k);
+					int nv = bb[2] + add;
+					if (nv > 255) nv = 255;
+					if (nv > bb[2]) { bb[2] = (byte)nv; touched = true; }
+				}
+				if (add_b_peak > 0) {
+					int add = (int)(add_b_peak * k);
+					int nv = bb[3] + add;
+					if (nv > 255) nv = 255;
+					if (nv > bb[3]) { bb[3] = (byte)nv; touched = true; }
+				}
+			}
+		}
+
+		if (touched) {
+			byte *base = lightmaps + page * lightmap_bytes * BLOCK_WIDTH * BLOCK_HEIGHT;
+			base += (s->light_t * BLOCK_WIDTH + s->light_s) * lightmap_bytes;
+			R_BuildLightMap(s, base, BLOCK_WIDTH * lightmap_bytes);
+			Burn_DirtyPage(page, s->light_s, s->light_t, smax, tmax);
+		}
+	}
+}
+
+// Darkening stamp only (explosions).
+void Burn_Stamp (const vec3_t pos, float radius, float intensity)
+{
+	if (intensity <= 0.0f) return;
+	if (intensity > 1.0f) intensity = 1.0f;
+	int darken = (int)(intensity * 255.0f);
+	Burn_StampCoreEx(pos, radius, darken, 0, 0, 0);
+}
+
+// Colored-glow stamp (lightning and similar). `intensity` in [0, 1] scales
+// the peak add_rgb values. The color is added to the lumel without any
+// darkening, so the affected area turns brighter with the given tint.
+void Burn_StampColored (const vec3_t pos, float radius, float intensity,
+                       int r, int g, int b)
+{
+	if (intensity <= 0.0f) return;
+	if (intensity > 1.0f) intensity = 1.0f;
+	int rr = (int)(intensity * (float)r);
+	int gg = (int)(intensity * (float)g);
+	int bb = (int)(intensity * (float)b);
+	Burn_StampCoreEx(pos, radius, 0, rr, gg, bb);
+}
+
 int			allocated[MAX_LIGHTMAPS][BLOCK_WIDTH];
 
 msurface_t  *skychain		= NULL;
@@ -261,8 +434,12 @@ R_BuildLightMap
 Combine and scale multiple lightmaps into the 8.8 format in blocklights
 ===============
 */
+// Counter read by gl_exposure.cpp to confirm the rebuild path is firing.
+int R_BuildLightMap_Counter = 0;
+
 void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 {
+	R_BuildLightMap_Counter++;
 	int			smax, tmax;
 	int			t;
 	int			i, j, size, blocksize;
@@ -322,8 +499,14 @@ void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 store:
 	bl = blocklights;
 	stride -= smax * lightmap_bytes;
+	// Walk the corresponding row of burn_atlas. Burn is indexed the same way
+	// as the lightmap page: (light_t + i) rows, (light_s + j) columns within
+	// page surf->lightmaptexturenum.
+	int burn_page_base = surf->lightmaptexturenum * BLOCK_WIDTH * BLOCK_HEIGHT * BURN_STRIDE;
 	for (i=0 ; i<tmax ; i++, dest += stride)
 	{
+		int row_off = burn_page_base +
+		              ((surf->light_t + i) * BLOCK_WIDTH + surf->light_s) * BURN_STRIDE;
 		for (j=0 ; j<smax ; j++)
 		{
 			// Tomaz - Lit Support Begin
@@ -331,6 +514,24 @@ store:
 			t = bl[1] >> 7;if (t > 255) t = 255;dest[1] = t;
 			t = bl[2] >> 7;if (t > 255) t = 255;dest[2] = t;
 			if (lightmap_bytes > 3)	dest[3] = 255;
+
+			// Burn overlay: darken then add colored glow. Clamped to 255.
+			byte *bb = &burn_atlas[row_off + j * BURN_STRIDE];
+			byte darken = bb[0];
+			if (darken) {
+				unsigned keep = 255u - darken;
+				dest[0] = (byte)((dest[0] * keep) >> 8);
+				dest[1] = (byte)((dest[1] * keep) >> 8);
+				dest[2] = (byte)((dest[2] * keep) >> 8);
+			}
+			if (bb[1] | bb[2] | bb[3]) {
+				int nr = dest[0] + bb[1]; if (nr > 255) nr = 255;
+				int ng = dest[1] + bb[2]; if (ng > 255) ng = 255;
+				int nb = dest[2] + bb[3]; if (nb > 255) nb = 255;
+				dest[0] = (byte)nr;
+				dest[1] = (byte)ng;
+				dest[2] = (byte)nb;
+			}
 
 			bl		+= 3;
 			dest	+= lightmap_bytes;

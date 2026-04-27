@@ -24,8 +24,8 @@ extern float TraceLine (vec3_t start, vec3_t end, vec3_t impact, vec3_t normal);
 // Tunables.
 // ---------------------------------------------------------------------------
 #define EXPL_MAX                  64     // concurrent explosions
-#define EXPL_CORE_RADIUS         48.0f
-#define EXPL_CORE_LIFE            0.9f
+#define EXPL_CORE_RADIUS         24.0f
+#define EXPL_CORE_LIFE            0.15f
 #define EXPL_SPARKS              20     // -30% vs original (was 28)
 #define EXPL_SPARK_MIN_DIST      50.0f  // spawn offset from blast center
 #define EXPL_SPARK_SPEED        220.0f
@@ -671,6 +671,10 @@ void Explosion_Spawn (const vec3_t origin, int tint /* 0=rocket, 1=tarbaby */)
 	Explosion_TriggerFlash(origin);
 	Explosion_ScheduleShrapnel(origin);
 	Explosion_SpawnDlight(origin, tint, slot);
+
+	// Persistent burn marks on the surrounding walls.
+	extern void Burn_Stamp (const vec3_t pos, float radius, float intensity);
+	Burn_Stamp(origin, 56.0f, 0.7f);
 }
 
 // ---------------------------------------------------------------------------

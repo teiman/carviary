@@ -707,6 +707,11 @@ R_SetupFrame
 void R_SetupFrame (void)
 {
 	R_AnimateLight ();
+	// Adaptive exposure: add an offset to d_lightstylevalue[0] so the
+	// world brightens in dark zones and darkens in bright zones. Must run
+	// AFTER R_AnimateLight so we see this frame's natural style-0 value.
+	extern void Exposure_Update (float frametime);
+	Exposure_Update ((float)host_frametime);
 
 	r_framecount++;
 

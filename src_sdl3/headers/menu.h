@@ -40,8 +40,6 @@ typedef enum
 	m_misc,
 	m_help,
 	m_quit,
-	m_serialconfig,
-	m_modemconfig,
 	m_lanconfig,
 	m_gameoptions,
 	m_search,
@@ -93,8 +91,6 @@ void M_Menu_Help_f (void);
 
 void M_Menu_Quit_f (void);
 
-void M_Menu_SerialConfig_f (void);
-void M_Menu_ModemConfig_f (void);
 void M_Menu_LanConfig_f (void);
 void M_Menu_GameOptions_f (void);
 void M_Menu_Search_f (void);
@@ -121,8 +117,6 @@ void M_Help_Draw (void);
 
 void M_Quit_Draw (void);
 
-void M_SerialConfig_Draw (void);
-void M_ModemConfig_Draw (void);
 void M_LanConfig_Draw (void);
 void M_GameOptions_Draw (void);
 void M_Search_Draw (void);
@@ -149,8 +143,6 @@ void M_Help_Key (int key);
 
 void M_Quit_Key (int key);
 
-void M_SerialConfig_Key (int key);
-void M_ModemConfig_Key (int key);
 void M_LanConfig_Key (int key);
 void M_GameOptions_Key (int key);
 void M_Search_Key (int key);

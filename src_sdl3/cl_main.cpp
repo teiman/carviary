@@ -71,6 +71,12 @@ void CL_ClearState (void)
 
 	SZ_Clear (&cls.message);
 
+	// reset decoupled-camera state so the new level snaps to the player's angles
+	{
+		extern qboolean cam_viewangles_init;
+		cam_viewangles_init = false;
+	}
+
 // clear other arrays	
 	memset (cl_efrags,			0, sizeof(cl_efrags));
 	memset (cl_entities,		0, sizeof(cl_entities));

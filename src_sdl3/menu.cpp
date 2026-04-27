@@ -316,14 +316,6 @@ void M_Draw (void)
 		M_Quit_Draw ();
 		break;
 
-	case m_serialconfig:
-		M_SerialConfig_Draw ();
-		break;
-
-	case m_modemconfig:
-		M_ModemConfig_Draw ();
-		break;
-
 	case m_lanconfig:
 		M_LanConfig_Draw ();
 		break;
@@ -416,14 +408,6 @@ void M_Keydown (int key)
 
 	case m_quit:
 		M_Quit_Key (key);
-		return;
-
-	case m_serialconfig:
-		M_SerialConfig_Key (key);
-		return;
-
-	case m_modemconfig:
-		M_ModemConfig_Key (key);
 		return;
 
 	case m_lanconfig:

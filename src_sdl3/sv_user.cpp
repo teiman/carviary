@@ -27,6 +27,12 @@ extern	cvar_t	sv_friction;
 cvar_t	sv_edgefriction = {"edgefriction", "2"};
 extern	cvar_t	sv_stopspeed;
 
+// forward refs to slide state defined further down
+extern qboolean slide_active;
+extern double   slide_end_time;
+extern cvar_t   slide_friction_scale;
+static void Slide_DetectClockReset (void);
+
 static	vec3_t		forward, right, up;
 
 vec3_t	wishdir;
@@ -146,7 +152,13 @@ void SV_UserFriction (void)
 	else
 		friction = sv_friction.value;
 
-// apply friction	
+	// while sliding, the ground rasps the player less so the speed bonus
+	// actually has time to ramp up before friction eats it.
+	Slide_DetectClockReset ();
+	if (slide_active && sv.time < slide_end_time)
+		friction *= slide_friction_scale.value;
+
+// apply friction
 	control = speed < sv_stopspeed.value ? sv_stopspeed.value : speed;
 	newspeed = speed - host_frametime*control*friction;
 	
@@ -166,6 +178,137 @@ SV_Accelerate
 */
 cvar_t	sv_maxspeed = {"sv_maxspeed", "320", false, true};
 cvar_t	sv_accelerate = {"sv_accelerate", "10"};
+
+// --- Slide (singleplayer trick) ---
+// Tunables. Defaults are placeholders; tweak in console while testing.
+cvar_t	slide_duration       = {"slide_duration",       "0.8",  false}; // seconds
+cvar_t	slide_speed_bonus    = {"slide_speed_bonus",    "400",  false}; // added to wishspeed cap
+cvar_t	slide_view_drop      = {"slide_view_drop",      "30",   false}; // units of camera drop
+cvar_t	slide_min_speed      = {"slide_min_speed",      "100",  false}; // need to be moving this fast to start
+cvar_t	slide_friction_scale = {"slide_friction_scale", "0.25", false}; // multiplier on ground friction while sliding
+cvar_t	slide_kick           = {"slide_kick",           "200",  false}; // one-shot velocity kick along facing on start
+// Camera ease curves: rapid duck on the way down, slower rise on the way back up.
+cvar_t	slide_drop_time      = {"slide_drop_time",      "0.12", false}; // seconds to ease down (ease-out cubic)
+cvar_t	slide_rise_time      = {"slide_rise_time",      "0.25", false}; // seconds to ease up at the end (ease-in cubic)
+cvar_t	slide_fov_delta      = {"slide_fov_delta",      "10",   false}; // degrees added to fov while sliding (negative = zoom in)
+
+double	slide_start_time = 0;   // sv.time when the slide started
+double	slide_end_time = 0;     // sv.time when the slide ends; 0 = inactive
+qboolean slide_active = false;  // mirror flag, also read from view.cpp
+static double slide_last_seen_time = 0; // sv.time observed last frame; resets state on map change
+
+// Detect a backwards jump in sv.time (new map / demo / load) and clear any
+// stale slide state. Call this from any slide entry point that reads sv.time.
+static void Slide_DetectClockReset (void)
+{
+	if (sv.time + 0.001 < slide_last_seen_time)
+	{
+		slide_active     = false;
+		slide_start_time = 0;
+		slide_end_time   = 0;
+	}
+	slide_last_seen_time = sv.time;
+}
+
+// Returns the camera/weapon drop multiplier in [0,1] for the current sv.time.
+// 0 = standing, 1 = fully crouched. Outside slide returns 0.
+float Slide_ViewFactor (void)
+{
+	Slide_DetectClockReset ();
+	if (!slide_active)
+		return 0.0f;
+
+	double now = sv.time;
+	if (now >= slide_end_time)
+		return 0.0f;
+
+	double drop = slide_drop_time.value > 0 ? slide_drop_time.value : 0.001;
+	double rise = slide_rise_time.value > 0 ? slide_rise_time.value : 0.001;
+	double remaining = slide_end_time - now;
+	double elapsed   = now - slide_start_time;
+
+	// rise phase wins if we're inside the trailing window
+	if (remaining < rise)
+	{
+		float t = (float)(remaining / rise); // 1 -> 0 as time runs out
+		// ease-in cubic on the way up: stays low longer, then snaps to standing
+		return t * t * t;
+	}
+
+	// drop phase at the start
+	if (elapsed < drop)
+	{
+		float t = (float)(elapsed / drop); // 0 -> 1 as we duck
+		// ease-out cubic on the way down: snaps quickly, settles
+		float inv = 1.0f - t;
+		return 1.0f - inv * inv * inv;
+	}
+
+	// hold
+	return 1.0f;
+}
+
+// Returns the cap that wishspeed is clamped against, including any slide bonus.
+static float SV_GetEffectiveMaxSpeed (void)
+{
+	Slide_DetectClockReset ();
+	if (slide_active && sv.time < slide_end_time)
+		return sv_maxspeed.value + slide_speed_bonus.value;
+
+	if (slide_active)
+		slide_active = false; // expired, clear flag
+
+	return sv_maxspeed.value;
+}
+
+static void Slide_Cmd_f (void)
+{
+	if (!sv.active || !sv_player)
+		return;
+
+	Slide_DetectClockReset ();
+
+	// must be alive and moving fast enough to start a slide
+	if (sv_player->v.health <= 0)
+		return;
+
+	float vx = sv_player->v.velocity[0];
+	float vy = sv_player->v.velocity[1];
+	float speed2d = sqrtf(vx*vx + vy*vy);
+	if (speed2d < slide_min_speed.value)
+		return;
+
+	if (slide_active && sv.time < slide_end_time)
+		return; // already sliding, ignore
+
+	slide_active     = true;
+	slide_start_time = sv.time;
+	slide_end_time   = sv.time + slide_duration.value;
+
+	// One-shot kick along the direction the player is currently moving in 2D.
+	// Without this the slide ramps up slowly because acceleration and friction
+	// both scale with speed and find a new equilibrium gradually.
+	if (slide_kick.value > 0 && speed2d > 0.001f)
+	{
+		float inv = slide_kick.value / speed2d;
+		sv_player->v.velocity[0] += vx * inv;
+		sv_player->v.velocity[1] += vy * inv;
+	}
+}
+
+void Slide_Init (void)
+{
+	Cvar_RegisterVariable (&slide_duration);
+	Cvar_RegisterVariable (&slide_speed_bonus);
+	Cvar_RegisterVariable (&slide_view_drop);
+	Cvar_RegisterVariable (&slide_min_speed);
+	Cvar_RegisterVariable (&slide_friction_scale);
+	Cvar_RegisterVariable (&slide_kick);
+	Cvar_RegisterVariable (&slide_drop_time);
+	Cvar_RegisterVariable (&slide_rise_time);
+	Cvar_RegisterVariable (&slide_fov_delta);
+	Cmd_AddCommand ("slide", Slide_Cmd_f);
+}
 
 void SV_Accelerate (void)
 {
@@ -239,11 +382,14 @@ void SV_WaterMove (void)
 	else
 		wishvel[2] += cmd.upmove;
 
-	wishspeed = Length(wishvel);
-	if (wishspeed > sv_maxspeed.value)
 	{
-		VectorScale (wishvel, sv_maxspeed.value/wishspeed, wishvel);
-		wishspeed = sv_maxspeed.value;
+		float maxspd = SV_GetEffectiveMaxSpeed();
+		wishspeed = Length(wishvel);
+		if (wishspeed > maxspd)
+		{
+			VectorScale (wishvel, maxspd/wishspeed, wishvel);
+			wishspeed = maxspd;
+		}
 	}
 	wishspeed *= 0.7f;
 
@@ -328,12 +474,15 @@ void SV_AirMove (void)
 	else
 		wishvel[2] = 0;
 
-	VectorCopy (wishvel, wishdir);
-	wishspeed = VectorNormalize(wishdir);
-	if (wishspeed > sv_maxspeed.value)
 	{
-		VectorScale (wishvel, sv_maxspeed.value/wishspeed, wishvel);
-		wishspeed = sv_maxspeed.value;
+		float maxspd = SV_GetEffectiveMaxSpeed();
+		VectorCopy (wishvel, wishdir);
+		wishspeed = VectorNormalize(wishdir);
+		if (wishspeed > maxspd)
+		{
+			VectorScale (wishvel, maxspd/wishspeed, wishvel);
+			wishspeed = maxspd;
+		}
 	}
 	
 	if ( sv_player->v.movetype == MOVETYPE_NOCLIP)

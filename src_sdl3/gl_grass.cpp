@@ -848,6 +848,7 @@ void Grass_DrawBlades (void)
 // loader already lowercases). Extend as you find more candidates.
 static const char *grass_auto_names[] = {
 	"ground1_6",
+	"wgrnd1_6",
 	NULL
 };
 

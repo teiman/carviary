@@ -144,6 +144,10 @@ void R_Init (void)
 	extern void Gunshot_Init(void);
 	Gunshot_Init();
 
+	// Adaptive exposure (eye-adaptation via lightstyle-0 delta).
+	extern void Exposure_Init(void);
+	Exposure_Init();
+
 	// Offscreen scene FBO for post-processing.
 	PostFX_Init();
 
@@ -294,6 +298,10 @@ void R_NewMap (void)
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 	R_TrueTrail_Clear ();
+	extern void R_ClearBurnMarks (void);
+	R_ClearBurnMarks ();
+	extern void Exposure_Reset (void);
+	Exposure_Reset ();
 
 	r_dlightframecount = 0;
 

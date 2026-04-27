@@ -58,6 +58,9 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_aim);
 	Cvar_RegisterVariable (&sv_nostep);
 
+	extern void Slide_Init (void);
+	Slide_Init ();
+
 	for (i=0 ; i<MAX_MODELS ; i++)
 		_snprintf (localmodels[i], sizeof(localmodels[i]), "*%i", i);
 }

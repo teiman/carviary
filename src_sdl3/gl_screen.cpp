@@ -806,11 +806,34 @@ void SCR_UpdateScreen (void)
 	if (vid.recalc_refdef)
 		SCR_CalcRefdef ();
 
+	// slide: bend the effective fov by slide_fov_delta * curve(t). Done here,
+	// every frame, instead of inside SCR_CalcRefdef which only re-runs when
+	// scr_fov / viewsize actually change. Recomputed from scr_fov each frame
+	// so the base value never gets clobbered.
+	{
+		extern cvar_t slide_fov_delta;
+		extern float  Slide_ViewFactor (void);
+		float f = Slide_ViewFactor();
+		if (f > 0)
+		{
+			r_refdef.fov_x = scr_fov.value + slide_fov_delta.value * f;
+			if (r_refdef.fov_x < 10)  r_refdef.fov_x = 10;
+			if (r_refdef.fov_x > 170) r_refdef.fov_x = 170;
+			r_refdef.fov_y = CalcFov (r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
+		}
+		else if (r_refdef.fov_x != scr_fov.value)
+		{
+			// just exited slide: restore the base values once
+			r_refdef.fov_x = scr_fov.value;
+			r_refdef.fov_y = CalcFov (r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
+		}
+	}
+
 //
 // do 3D refresh drawing, and then update the screen
 //
 	SCR_SetUpToDrawConsole ();
-	
+
 	V_RenderView ();
 
 	Prof_BeginSection (PROF_HUD_2D);

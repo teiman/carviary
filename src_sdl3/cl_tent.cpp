@@ -62,15 +62,18 @@ void CL_InitTEnts (void)
 CL_ParseBeam
 =================
 */
+extern float TraceLine (vec3_t start, vec3_t end, vec3_t impact, vec3_t normal);
+extern void  Burn_StampColored (const vec3_t pos, float radius, float intensity, int r, int g, int b);
+
 void CL_ParseBeam (model_t *m)
 {
 	int		ent;
 	vec3_t	start, end;
 	beam_t	*b;
 	int		i;
-	
+
 	ent = MSG_ReadShort ();
-	
+
 	start[0] = MSG_ReadCoord ();
 	start[1] = MSG_ReadCoord ();
 	start[2] = MSG_ReadCoord ();
@@ -78,6 +81,41 @@ void CL_ParseBeam (model_t *m)
 	end[0] = MSG_ReadCoord ();
 	end[1] = MSG_ReadCoord ();
 	end[2] = MSG_ReadCoord ();
+
+	// Lightning impact: if the beam endpoint is against solid geometry,
+	// leave a bright blue mark on the wall. Throttled to one stamp every
+	// 0.08 seconds per beam-entity so a held trigger doesn't saturate.
+	{
+		static float last_stamp_time[MAX_BEAMS];
+		if (cl.worldmodel && (unsigned)ent < MAX_BEAMS &&
+		    cl.time - last_stamp_time[ent] >= 0.08)
+		{
+			vec3_t probe_end = {
+				end[0] + (end[0] - start[0]) * 0.01f,
+				end[1] + (end[1] - start[1]) * 0.01f,
+				end[2] + (end[2] - start[2]) * 0.01f,
+			};
+			vec3_t impact, normal;
+			vec3_t s_nc = { start[0], start[1], start[2] };
+			float frac = TraceLine(s_nc, probe_end, impact, normal);
+			if (frac < 1.0f) {
+				// Back the stamp off the wall slightly so the lumel at the
+				// impact is firmly inside the face, not on the edge.
+				vec3_t p = {
+					impact[0] - (probe_end[0] - start[0]) * 0.001f,
+					impact[1] - (probe_end[1] - start[1]) * 0.001f,
+					impact[2] - (probe_end[2] - start[2]) * 0.001f,
+				};
+				// Two-layer stamp: a tight white-hot core on top of a wider
+				// blue halo. Additive blending clamps at 255, so the center
+				// naturally saturates to pure white while the outer ring
+				// keeps the blue tint.
+				Burn_StampColored(p, 40.0f, 0.6f, 80, 140, 255);    // halo
+				Burn_StampColored(p, 16.0f, 1.0f, 255, 255, 255);   // core flash
+				last_stamp_time[ent] = cl.time;
+			}
+		}
+	}
 
 // override any beam with the same entity
 	for (i=0, b=cl_beams ; i< MAX_BEAMS ; i++, b++)

@@ -58,6 +58,24 @@ cvar_t	crosshair = {"crosshair", "0", true};
 cvar_t	cl_crossx = {"cl_crossx", "0", false};
 cvar_t	cl_crossy = {"cl_crossy", "0", false};
 
+// --- Decoupled crosshair / soft-follow camera ---
+// cl.viewangles is the crosshair direction (sent to server, used by v_weapon).
+// cam_viewangles is the rendering camera direction (lerped to softly follow).
+cvar_t	cam_decoupled = {"cam_decoupled", "0", true};
+cvar_t	cam_rect_yaw   = {"cam_rect_yaw",   "12", true}; // half-width of rect in degrees
+cvar_t	cam_rect_pitch = {"cam_rect_pitch", "8",  true}; // half-height of rect in degrees
+cvar_t	cam_follow_speed = {"cam_follow_speed", "5.2", true};  // base follow rate (1/s, +30%)
+cvar_t	cam_follow_edge  = {"cam_follow_edge",  "20.8", true}; // extra rate at the edge (+30%)
+// Resistance when looking far up/down: at |pitch| >= cam_pitch_resist_max,
+// follow factor is multiplied by (1 - cam_pitch_resist). 0 disables it.
+cvar_t	cam_pitch_resist     = {"cam_pitch_resist",     "0.75", true};
+cvar_t	cam_pitch_resist_max = {"cam_pitch_resist_max", "70",   true};
+
+vec3_t	cam_viewangles;            // smoothed camera angles for rendering
+qboolean cam_viewangles_init = false;
+float	cl_crosshair_screen_dx = 0; // signed pixel offset from screen centre
+float	cl_crosshair_screen_dy = 0;
+
 cvar_t	v_gamma = {"v_gamma", "1", true};
 
 cvar_t	gl_cshiftpercent = {"gl_cshiftpercent", "100", false};
@@ -812,6 +830,15 @@ void V_CalcRefdef (void)
 	VectorCopy (ent->origin, r_refdef.vieworg);
 	r_refdef.vieworg[2] += cl.viewheight + bob;
 
+	// slide: drop the camera while active, eased by the slide curve.
+	{
+		extern cvar_t slide_view_drop;
+		extern float  Slide_ViewFactor (void);
+		float f = Slide_ViewFactor();
+		if (f > 0)
+			r_refdef.vieworg[2] -= slide_view_drop.value * f;
+	}
+
 // never let it sit exactly on a node line, because a water plane can
 // dissapear when viewed with the eye exactly on it.
 // the server protocol only specifies to 1/16 pixel, so add 1/32 in each axis
@@ -819,7 +846,60 @@ void V_CalcRefdef (void)
 	r_refdef.vieworg[1] += 0.03125;	// Tomaz - Speed
 	r_refdef.vieworg[2] += 0.03125;	// Tomaz - Speed
 
-	VectorCopy (cl.viewangles, r_refdef.viewangles);
+	if (cam_decoupled.value)
+	{
+		float	rect_y = cam_rect_yaw.value   > 0.5f ? cam_rect_yaw.value   : 0.5f;
+		float	rect_p = cam_rect_pitch.value > 0.5f ? cam_rect_pitch.value : 0.5f;
+		float	dyaw, dpitch, ny, np, edge, k;
+
+		if (!cam_viewangles_init)
+		{
+			VectorCopy (cl.viewangles, cam_viewangles);
+			cam_viewangles_init = true;
+		}
+
+		// signed angular delta (crosshair - camera), normalised to (-180,180]
+		dyaw   = cl.viewangles[YAW]   - cam_viewangles[YAW];
+		dpitch = cl.viewangles[PITCH] - cam_viewangles[PITCH];
+		while (dyaw   >  180) dyaw   -= 360;
+		while (dyaw   < -180) dyaw   += 360;
+		while (dpitch >  180) dpitch -= 360;
+		while (dpitch < -180) dpitch += 360;
+
+		// distance to edge of rect, normalised to [0,1]
+		ny = fabs(dyaw)   / rect_y;   if (ny > 1) ny = 1;
+		np = fabs(dpitch) / rect_p;   if (np > 1) np = 1;
+		edge = ny > np ? ny : np;
+
+		k = (cam_follow_speed.value + cam_follow_edge.value * edge * edge) * host_frametime;
+
+		// extra resistance when looking far up or down: slow the camera down
+		// so the player has to "fight" to keep tracking near vertical extremes.
+		if (cam_pitch_resist.value > 0 && cam_pitch_resist_max.value > 0)
+		{
+			float ap = fabs(cl.viewangles[PITCH]) / cam_pitch_resist_max.value;
+			if (ap > 1) ap = 1;
+			float resist = cam_pitch_resist.value;
+			if (resist > 1) resist = 1;
+			k *= 1.0f - resist * ap * ap;
+		}
+
+		if (k > 1) k = 1;
+		if (k < 0) k = 0;
+
+		cam_viewangles[YAW]   += dyaw   * k;
+		cam_viewangles[PITCH] += dpitch * k;
+		// roll is left as-is (V_CalcViewRoll fills it below)
+		cam_viewangles[ROLL]   = cl.viewangles[ROLL];
+
+		VectorCopy (cam_viewangles, r_refdef.viewangles);
+	}
+	else
+	{
+		VectorCopy (cl.viewangles, r_refdef.viewangles);
+		VectorCopy (cl.viewangles, cam_viewangles);
+		cam_viewangles_init = true;
+	}
 	V_CalcViewRoll ();
 	V_AddIdle ();
 
@@ -847,11 +927,36 @@ void V_CalcRefdef (void)
 		
 // set up gun position
 	VectorCopy (cl.viewangles, view->angles);
-	
+
 	CalcGunAngle ();
+
+	// CalcGunAngle leaves cl.viewent.angles based on r_refdef.viewangles (the
+	// camera). When the camera is decoupled, re-aim the weapon at the crosshair
+	// by adding the (cursor - camera) angular delta on top of the wobble.
+	if (cam_decoupled.value)
+	{
+		float gdyaw   = cl.viewangles[YAW]   - r_refdef.viewangles[YAW];
+		float gdpitch = cl.viewangles[PITCH] - r_refdef.viewangles[PITCH];
+		while (gdyaw   >  180) gdyaw   -= 360;
+		while (gdyaw   < -180) gdyaw   += 360;
+		while (gdpitch >  180) gdpitch -= 360;
+		while (gdpitch < -180) gdpitch += 360;
+		cl.viewent.angles[YAW]   += gdyaw;
+		cl.viewent.angles[PITCH] -= gdpitch; // viewent pitch is inverted
+	}
 
 	VectorCopy (ent->origin, view->origin);
 	view->origin[2] += cl.viewheight;
+
+	// slide: drop the weapon model in lockstep with the camera so it doesn't
+	// look like it's floating above the player's hands.
+	{
+		extern cvar_t slide_view_drop;
+		extern float  Slide_ViewFactor (void);
+		float f = Slide_ViewFactor();
+		if (f > 0)
+			view->origin[2] -= slide_view_drop.value * f;
+	}
 
 	view->origin[0] += forward[0]*bob*0.4;
 	view->origin[1] += forward[1]*bob*0.4;
@@ -865,6 +970,28 @@ void V_CalcRefdef (void)
 
 // set up the refresh position
 	VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
+
+	// crosshair screen position: project the angular delta between the aim
+	// direction (cl.viewangles) and the rendered camera (r_refdef.viewangles)
+	// onto the viewport using the current fov.
+	if (cam_decoupled.value && r_refdef.fov_x > 0 && r_refdef.fov_y > 0)
+	{
+		float dyaw   = cl.viewangles[YAW]   - r_refdef.viewangles[YAW];
+		float dpitch = cl.viewangles[PITCH] - r_refdef.viewangles[PITCH];
+		while (dyaw   >  180) dyaw   -= 360;
+		while (dyaw   < -180) dyaw   += 360;
+		while (dpitch >  180) dpitch -= 360;
+		while (dpitch < -180) dpitch += 360;
+
+		// yaw+ in Quake = look left, so the crosshair appears to the left of centre.
+		cl_crosshair_screen_dx = -(dyaw   / (r_refdef.fov_x * 0.5f)) * (vid.width  * 0.5f);
+		cl_crosshair_screen_dy =  (dpitch / (r_refdef.fov_y * 0.5f)) * (vid.height * 0.5f);
+	}
+	else
+	{
+		cl_crosshair_screen_dx = 0;
+		cl_crosshair_screen_dy = 0;
+	}
 
 // smooth out stair step ups
 if (cl.onground && ent->origin[2] - oldz > 0)
@@ -951,6 +1078,14 @@ void V_Init (void)
 	Cvar_RegisterVariable (&v_ipitch_level);
 
 	Cvar_RegisterVariable (&v_idlescale);
+
+	Cvar_RegisterVariable (&cam_decoupled);
+	Cvar_RegisterVariable (&cam_rect_yaw);
+	Cvar_RegisterVariable (&cam_rect_pitch);
+	Cvar_RegisterVariable (&cam_follow_speed);
+	Cvar_RegisterVariable (&cam_follow_edge);
+	Cvar_RegisterVariable (&cam_pitch_resist);
+	Cvar_RegisterVariable (&cam_pitch_resist_max);
 	Cvar_RegisterVariable (&crosshair);
 	Cvar_RegisterVariable (&cl_crossx);
 	Cvar_RegisterVariable (&cl_crossy);
