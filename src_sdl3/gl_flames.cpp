@@ -43,6 +43,11 @@
 #define EMBER_SWAY_UNITS          5.0f    // horizontal drift amplitude
 #define EMBER_POINT_SIZE_PX       3.5f    // fullscreen point size (peak)
 
+// Toggles. Disabling flame puffs leaves only the rising embers, which read as
+// "hot lava with sparks" without the cartoony fire columns.
+static cvar_t r_lava_flames = {"r_lava_flames", "0", true};
+static cvar_t r_lava_embers = {"r_lava_embers", "1", true};
+
 // ---------------------------------------------------------------------------
 // Vertex layout. One entry per billboard corner (4 corners = 4 vertices per
 // flame, drawn as triangle-strip via indexed fan? Simpler: 6 verts/flame
@@ -710,10 +715,13 @@ void Flames_Draw (void)
 	glDepthMask(GL_FALSE);
 	if (cull_was) glDisable(GL_CULL_FACE);
 
+	// Always build the data (embers share the build path), but only emit the
+	// flame draw calls when r_lava_flames is on.
 	for (int i = 0; i < cl.worldmodel->numtextures; ++i) {
 		texture_t *t = cl.worldmodel->textures[i];
 		if (!Flames_TextureIsLava(t)) continue;
 		Flames_BuildBillboards(i);
+		if (!r_lava_flames.value) continue;
 		flame_tex_data_t *td = &flame_tex_data[i];
 		if (td->num_verts == 0) continue;
 		glBindVertexArray(td->vao);
@@ -722,7 +730,7 @@ void Flames_Draw (void)
 
 	// Ember pass: GL_POINTS, same additive blend and depth state. We need
 	// the vertex shader to be allowed to set gl_PointSize; enable it once.
-	if (R_EnsureEmbersShader()) {
+	if (r_lava_embers.value && R_EnsureEmbersShader()) {
 		glEnable(GL_PROGRAM_POINT_SIZE);
 		GLShader_Use(&R_EmbersShader);
 		glUniformMatrix4fv(R_EmbersShader_u_mvp, 1, GL_FALSE, mvp);
@@ -753,6 +761,7 @@ void Flames_Draw (void)
 
 void Flames_Init (void)
 {
-	// No console commands for now -- the system is fully automatic.
+	Cvar_RegisterVariable (&r_lava_flames);
+	Cvar_RegisterVariable (&r_lava_embers);
 	// Hook point lives in gl_render.h so gl_rsurf can call Flames_Draw().
 }
